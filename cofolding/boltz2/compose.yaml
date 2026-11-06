@@ -1,0 +1,27 @@
+services:
+  boltz:
+    image: ${BOLTZ_IMAGE:-container-library/boltz2:2.2.1}
+    build:
+      context: .
+    user: "${BOLTZ_UID:-1000}:${BOLTZ_GID:-1000}"
+    working_dir: /workspace/inputs
+    shm_size: ${BOLTZ_SHM_SIZE:-8gb}
+    cpus: ${BOLTZ_CPUS:-8}
+    mem_limit: ${BOLTZ_MEMORY:-36g}
+    environment:
+      BOLTZ_CACHE: /workspace/cache
+      HOME: /workspace/cache
+      TRITON_CACHE_DIR: /workspace/cache/triton
+      HF_HOME: /workspace/cache/hf
+      XDG_CACHE_HOME: /workspace/cache
+    volumes:
+      - ${BOLTZ_INPUTS:?Set BOLTZ_INPUTS to an existing input directory}:/workspace/inputs:ro
+      - ${BOLTZ_OUTPUTS:?Set BOLTZ_OUTPUTS to a writable output directory}:/workspace/outputs
+      - ${BOLTZ_CACHE_HOST:?Set BOLTZ_CACHE_HOST to a writable asset/cache directory}:/workspace/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${BOLTZ_GPU:?Set BOLTZ_GPU to the allocated GPU UUID}"]
+              capabilities: [gpu]

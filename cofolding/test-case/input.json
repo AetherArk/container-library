@@ -1,0 +1,14 @@
+{
+  "id": "trpcage-ethanol",
+  "protein": {
+    "id": "A",
+    "sequence": "NLYIQWLKDGGPSSGRPPPS"
+  },
+  "ligand": {
+    "id": "L",
+    "smiles": "CCO"
+  },
+  "msa": "empty",
+  "seed": 0,
+  "samples": 1
+}
