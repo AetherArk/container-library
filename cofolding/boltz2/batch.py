@@ -128,10 +128,15 @@ def parser():
     p.add_argument('--memory', default='36g', help='Inference RAM and RAM+swap limit')
     p.add_argument('--verify-cpus', type=float, default=2)
     p.add_argument('--verify-memory', default='8g')
-    p.add_argument('--threads', type=int, default=2, help='Native preprocessing and numerical library threads')
+    p.add_argument('--threads', type=int, default=2, help='Numerical library threads; 0 leaves image defaults unset')
+    p.add_argument('--preprocessing-threads', type=int, help='Native preprocessing threads (default: --threads, or host CPU count when threads=0)')
+    p.add_argument('--num-workers', type=int, default=0, help='Native data-loader workers')
     p.add_argument('--seeds', nargs='+', type=int, default=[0])
     for name, default in [('diffusion_samples',1),('recycling_steps',3),('sampling_steps',200),('max_parallel_samples',1)]: p.add_argument('--'+name, type=int, default=default)
     p.add_argument('--no_kernels', action='store_true')
+    p.add_argument('--output-format', choices=('pdb', 'mmcif'), default='mmcif')
+    p.add_argument('--use-potentials', action='store_true')
+    p.add_argument('--no-write-embeddings', dest='write_embeddings', action='store_false', default=True)
     p.add_argument('--timeout', type=int, default=1800, help='Per-seed inference limit in seconds')
     p.add_argument('--resume', action='store_true')
     p.add_argument('--dry-run', action='store_true')
@@ -144,7 +149,10 @@ def command(a, output, script, seed, gpu=False):
            '-v',f'{output}:/run','-v',f'{output}/code:/scripts:ro','-v',f'{a.cache}:/models:ro','-v',f'{a.checkpoint}:/checkpoint:ro']
     if gpu: cmd += ['--gpus','device='+a.gpu]
     else: cmd += ['-e','NVIDIA_VISIBLE_DEVICES=void']
-    for k,v in {'TMPDIR':'/run/tmp','HOME':'/run/tmp','NUMBA_CACHE_DIR':'/run/tmp/numba','TRITON_CACHE_DIR':'/run/tmp/triton','HF_HUB_OFFLINE':'1','OMP_NUM_THREADS':str(a.threads),'OPENBLAS_NUM_THREADS':str(a.threads),'MKL_NUM_THREADS':str(a.threads),'PYTHONDONTWRITEBYTECODE':'1'}.items(): cmd += ['-e',k+'='+v]
+    env = {'TMPDIR':'/run/tmp','HOME':'/run/tmp','NUMBA_CACHE_DIR':'/run/tmp/numba','TRITON_CACHE_DIR':'/run/tmp/triton','HF_HUB_OFFLINE':'1','PYTHONDONTWRITEBYTECODE':'1'}
+    if a.threads:
+        env.update({key: str(a.threads) for key in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS')})
+    for k,v in env.items(): cmd += ['-e',k+'='+v]
     return cmd+['--entrypoint','python',a.image,'/scripts/'+script,str(seed)]
 
 
@@ -177,10 +185,13 @@ def run_owned(cmd, log, timeout):
 
 def main():
     a = parser().parse_args()
+    if a.preprocessing_threads is None: a.preprocessing_threads = a.threads or os.cpu_count() or 1
+    if a.num_workers < 0: raise ValueError('Nonnegative worker count required')
+    if a.preprocessing_threads < 1: raise ValueError('Positive preprocessing thread count required')
     if len(set(a.seeds)) != len(a.seeds) or any(not 0 <= s <= 4294967295 for s in a.seeds): raise ValueError('Unique uint32 native seeds required')
     if min(a.diffusion_samples,a.sampling_steps,a.max_parallel_samples) < 1 or a.recycling_steps < 0: raise ValueError('Invalid sampling schedule')
     if not re.fullmatch(r'GPU-[0-9a-fA-F-]+',a.gpu): raise ValueError('Explicit allocated GPU UUID required')
-    if a.timeout < 1 or a.threads < 1: raise ValueError('Positive timeout and thread count required')
+    if a.timeout < 1 or a.threads < 0: raise ValueError('Positive timeout and nonnegative thread count required')
     if any(not math.isfinite(v) or v <= 0 for v in (a.cpus,a.verify_cpus)): raise ValueError('Positive finite CPU limits required')
     if any(not re.fullmatch(r'[1-9][0-9]*[bkmgBKMG]?',v) for v in (a.memory,a.verify_memory)): raise ValueError('Positive Docker memory limits required (bytes, b, k, m or g)')
     records, files = inputs(a.input)

@@ -40,7 +40,7 @@ GPU = 'GPU-01234567-89ab-cdef-0123-456789abcdef'
 
 
 def shared():
-    case = json.loads((ROOT.parent/'test-case/input.json').read_text())
+    case = json.loads((ROOT.parent/'test-cases/trpcage-ethanol/input.json').read_text())
     return {'version': 1, 'sequences': [
         {'protein': dict(case['protein'], msa=case['msa'])},
         {'ligand': case['ligand']} ]}
@@ -194,7 +194,7 @@ class BatchTests(unittest.TestCase):
 
     def test_invalid_schedule_and_limits_do_not_launch(self):
         for flags in (['--seeds', '0', '0'], ['--seeds', '-1'], ['--diffusion_samples', '0'],
-                      ['--recycling_steps', '-1'], ['--timeout', '0'], ['--threads', '0'],
+                      ['--recycling_steps', '-1'], ['--timeout', '0'], ['--threads', '-1'],
                       ['--cpus', 'nan'], ['--verify-cpus', '0'], ['--memory', '0g'],
                       ['--verify-memory', 'unbounded'], ['--gpu', '0']):
             with self.subTest(flags=flags), self.assertRaises(ValueError):

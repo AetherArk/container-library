@@ -1,0 +1,13 @@
+{
+  "record_id": "cyp",
+  "recycling_steps": 3,
+  "sampling_steps": 200,
+  "max_parallel_samples": 5,
+  "no_kernels": false,
+  "threads": 8,
+  "preprocessing_threads": 4,
+  "num_workers": 0,
+  "output_format": "mmcif",
+  "use_potentials": false,
+  "write_embeddings": true
+}

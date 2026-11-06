@@ -1,0 +1,13 @@
+{
+  "record_id": "x00242-1",
+  "recycling_steps": 3,
+  "sampling_steps": 200,
+  "max_parallel_samples": 5,
+  "no_kernels": false,
+  "threads": 0,
+  "preprocessing_threads": 24,
+  "num_workers": 2,
+  "output_format": "pdb",
+  "use_potentials": true,
+  "write_embeddings": false
+}

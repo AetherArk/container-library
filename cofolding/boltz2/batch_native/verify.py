@@ -91,18 +91,19 @@ def check_input(data,processed,rid,b):
 
 
 def check_cif(path,s,coords,elements):
-    st=gemmi.read_structure(str(path));require(len(st)==1,'one CIF model');actual={};expected={}
+    # Gemmi reads the native PDB or mmCIF directly; never convert coordinates.
+    st=gemmi.read_structure(str(path));require(len(st)==1,'one structure model');actual={};expected={}
     for c in st[0]:
         for r in c:
             for a in r:
                 key=(c.name,r.seqid.num,a.name);require(key not in actual,'duplicate atom')
                 actual[key]=np.array([a.pos.x,a.pos.y,a.pos.z])
-                if (c.name,a.name) in elements:require(a.element.name==elements[(c.name,a.name)],'CIF ligand element')
+                if (c.name,a.name) in elements:require(a.element.name==elements[(c.name,a.name)],'structure ligand element')
     for c in s.chains:
         for r in s.residues[int(c['res_idx']):int(c['res_idx']+c['res_num'])]:
             for idx in range(int(r['atom_idx']),int(r['atom_idx']+r['atom_num'])):expected[(str(c['name']),int(r['res_idx'])+1,str(s.atoms[idx]['name']))]=coords[idx]
-    require(set(actual)==set(expected),'CIF full atom inventory')
-    for k,v in expected.items():require(np.allclose(actual[k],v,rtol=0,atol=0.00051),'CIF coordinate pairing')
+    require(set(actual)==set(expected),'structure full atom inventory')
+    for k,v in expected.items():require(np.allclose(actual[k],v,rtol=0,atol=0.00051),'structure coordinate pairing')
 
 
 def verify(root,seed):
@@ -135,10 +136,12 @@ def verify(root,seed):
         eq(p['coords'],f['sample_atom_coords'],'forward coords');eq(p['masks'],b['atom_pad_mask'],'atom mask')
         s,elements=check_input(rec['yaml'],processed,rid,b)
         rank=torch.argsort(p['confidence_score'],descending=True).tolist();require(sorted(rank)==list(range(n)),'rank bijection');ranks[rid]=rank
-        pred=native/'predictions'/rid;expected={'embeddings_'+rid+'.npz'}
+        extension = 'pdb' if settings.get('output_format', 'mmcif') == 'pdb' else 'cif'
+        pred=native/'predictions'/rid
+        expected={'embeddings_'+rid+'.npz'} if settings.get('write_embeddings', True) else set()
         for r,i in enumerate(rank):
-            base=f'{rid}_model_{r}';expected|={base+'.cif','confidence_'+base+'.json',*{k+'_'+base+'.npz' for k in ('pae','pde','plddt')}}
-            check_cif(pred/(base+'.cif'),s,p['coords'][i][p['masks'][0].bool()].numpy(),elements)
+            base=f'{rid}_model_{r}';expected|={base+'.'+extension,'confidence_'+base+'.json',*{k+'_'+base+'.npz' for k in ('pae','pde','plddt')}}
+            check_cif(pred/(base+'.'+extension),s,p['coords'][i][p['masks'][0].bool()].numpy(),elements)
             conf=json.loads((pred/('confidence_'+base+'.json')).read_text())
             for field in SCALARS:eq(conf[field],p[field][i].numpy(),'confidence '+field)
             for a,vs in p['pair_chains_iptm'].items():
@@ -147,9 +150,10 @@ def verify(root,seed):
             for field in ('pae','pde','plddt'):
                 with np.load(pred/(field+'_'+base+'.npz'),allow_pickle=False) as z:eq(z[field],p[field][i].numpy(),field+' pairing')
         require({p.name for p in pred.iterdir()}==expected,'exact native output inventory')
-        with np.load(pred/('embeddings_'+rid+'.npz'),allow_pickle=False) as z:
-            require(set(z.files)=={'s','z'},'embeddings fields')
-            for k in z.files:eq(z[k],p[k].numpy(),'embeddings preservation')
+        if settings.get('write_embeddings', True):
+            with np.load(pred/('embeddings_'+rid+'.npz'),allow_pickle=False) as z:
+                require(set(z.files)=={'s','z'},'embeddings fields')
+                for k in z.files:eq(z[k],p[k].numpy(),'embeddings preservation')
     result={'status':'PASS','models':len(req['records'])*n,'rank_to_original_sample':ranks,'sha256':{str(p.relative_to(stage)):sha(p) for p in sorted(stage.rglob('*')) if p.is_file() and p.name!='verified.json'}}
     if prior is not None:require(result==prior,'output inventory changed')
     # Keep the temporary receipt outside the inventoried seed directory.
