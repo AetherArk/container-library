@@ -42,6 +42,7 @@ python3 fetch_assets.py --cache /absolute/path/to/cache
 - `--download`: explicit download/extraction from the revision in `assets.json`.
 - Without that flag: verify existing files only.
 - All three archives/checkpoints are size/hash checked; existing mismatches fail rather than being overwritten.
+- Extraction is staged and published with an archive-bound completion marker. Existing unmarked or incomplete `mols/` directories are refused; inspect/move them or use a fresh cache. The marker establishes completed extraction, not a fresh checksum scan of every extracted file.
 - Upstream Boltz 2.2.1 checks for the affinity checkpoint even for structure-only inference. The batch launcher replaces only that download step with offline checks, requiring the selected structure checkpoint and extracted `mols/` directory; the model/parser/writer calls are unchanged. The asset helper provisions the complete cache for both batch and native CLI use.
 - Upstream [code and weights license](https://github.com/jwohlwend/boltz/tree/cb04aeccdd480fd4db707f0bbafde538397fa2ac): MIT.
 - The image retains installed dependency metadata/licenses and upstream source LICENSE; see `licenses/Boltz-MIT.txt`.

@@ -18,7 +18,7 @@ import tarfile
 import tempfile
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, call
 
 import yaml
 
@@ -357,6 +357,42 @@ class VerifierInvalidationTests(unittest.TestCase):
 
 
 class AssetTests(unittest.TestCase):
+    def test_partial_directory_cannot_report_ready(self):
+        assets = load('boltz_assets', ROOT/'fetch_assets.py')
+        for download in (False, True):
+            with self.subTest(download=download), tempfile.TemporaryDirectory() as tmp:
+                cache = Path(tmp); (cache/'mols').mkdir()
+                argv = ['fetch_assets.py', '--cache', str(cache)] + (['--download'] if download else [])
+                manifest = json.loads((ROOT/'assets.json').read_text())
+                for name in manifest['files']:
+                    (cache/name).touch()
+                with patch.object(sys, 'argv', argv), patch.object(assets, 'verify'), patch('builtins.print') as output:
+                    with self.assertRaisesRegex(ValueError, 'Unverified/incomplete'):
+                        assets.main()
+                    self.assertNotIn(call('Assets ready'), output.call_args_list)
+
+    def test_interrupted_extraction_is_not_published_and_retry_succeeds(self):
+        assets = load('boltz_assets', ROOT/'fetch_assets.py')
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp)/'archive.tar'; cache = Path(tmp)/'cache'; cache.mkdir()
+            source = (ROOT/'examples/shared.yaml').read_bytes()
+            with tarfile.open(archive, 'w') as tar:
+                member = tarfile.TarInfo('mols/shared.yaml'); member.size = len(source)
+                tar.addfile(member, io.BytesIO(source))
+            def interrupted(destination, **kwargs):
+                (destination/'mols').mkdir()
+                (destination/'mols/shared.yaml').write_bytes(source[:1])
+                raise OSError('simulated disk failure')
+            with patch.object(tarfile.TarFile, 'extractall', side_effect=interrupted):
+                with self.assertRaisesRegex(OSError, 'simulated disk failure'):
+                    assets.extract(archive, cache)
+            self.assertFalse((cache/'mols').exists())
+            self.assertEqual(list(cache.iterdir()), [])
+            assets.extract(archive, cache)
+            self.assertTrue(assets.mols_ready(cache, batch.sha(archive)))
+            self.assertFalse(assets.mols_ready(cache, '0'*64))
+            self.assertEqual((cache/'mols/shared.yaml').read_bytes(), source)
+
     def test_verify_rejects_missing_wrong_size_and_wrong_hash(self):
         assets = load('boltz_assets', ROOT/'fetch_assets.py')
         with tempfile.TemporaryDirectory() as tmp:

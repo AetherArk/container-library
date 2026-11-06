@@ -1,6 +1,7 @@
 # Tested scope
 
-- CPU suite: 31 tests passed with Python 3.12 / PyYAML 6.0.2.
+- CPU suite: 33 tests passed with Python 3.12 / PyYAML 6.0.2.
+- Asset setup: real pinned archive extracted successfully into a fresh cache; subsequent verification passed. Interrupted extraction and incomplete-directory refusal are covered by CPU fault-injection tests.
 - Image: clean recipe build passed; native CLI help, Boltz2 model import, non-root UID 1000, and `pip check` passed.
 - GPU: shared Trp-cage/ethanol case, seed 0, one sample; 3 recycling steps, 200 sampling steps, `--no_kernels`; RTX 5070 Ti.
 - One checkpoint load; one prediction passed independent saved-output readback.

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import tarfile
+import tempfile
 import urllib.request
 
 
@@ -19,14 +20,40 @@ def verify(path, spec):
         raise ValueError('Checksum mismatch: ' + str(path))
 
 
+def mols_ready(cache, archive_sha256):
+    marker = cache / 'mols' / '.complete.json'
+    try:
+        return json.loads(marker.read_text()) == {'archive_sha256': archive_sha256}
+    except (OSError, ValueError):
+        return False
+
+
 def extract(archive, cache):
-    # Refuse links, devices, absolute paths, and path traversal before extraction.
-    with tarfile.open(archive) as tar:
-        for member in tar.getmembers():
-            parts = Path(member.name).parts
-            if not parts or parts[0] != 'mols' or '..' in parts or not (member.isfile() or member.isdir()):
-                raise ValueError('Unsafe archive member: ' + member.name)
-        tar.extractall(cache, filter='data')
+    target = cache / 'mols'
+    if target.exists() or target.is_symlink():
+        raise ValueError('Unverified mols directory exists; use a fresh cache or inspect/move it before extraction')
+    h = hashlib.sha256()
+    with archive.open('rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    with tempfile.TemporaryDirectory(prefix='.mols-staging-', dir=cache) as tmp:
+        staging = Path(tmp)
+        # Refuse links, devices, absolute paths, and traversal before extraction.
+        with tarfile.open(archive) as tar:
+            members = tar.getmembers()
+            if not members:
+                raise ValueError('Empty archive')
+            for member in members:
+                parts = Path(member.name).parts
+                if not parts or parts[0] != 'mols' or '..' in parts or not (member.isfile() or member.isdir()):
+                    raise ValueError('Unsafe archive member: ' + member.name)
+            tar.extractall(staging, filter='data')
+        extracted = staging / 'mols'
+        if not extracted.is_dir():
+            raise ValueError('Archive did not produce mols directory')
+        (extracted / '.complete.json').write_text(json.dumps({'archive_sha256': h.hexdigest()}))
+        # Directory and completion marker become visible together on this filesystem.
+        extracted.rename(target)
 
 
 def main():
@@ -53,9 +80,11 @@ def main():
             partial.replace(target)
         verify(target, spec)
         print('Verified ' + name, flush=True)
-    if not (cache / 'mols').is_dir():
+    if not mols_ready(cache, manifest['files']['mols.tar']['sha256']):
+        if (cache / 'mols').exists() or (cache / 'mols').is_symlink():
+            raise ValueError('Unverified/incomplete mols directory; use a fresh cache or inspect/move the existing directory')
         if not a.download:
-            raise ValueError('Missing extracted mols directory; use --download to extract verified archive')
+            raise ValueError('Missing verified mols directory; use --download to extract the verified archive')
         extract(cache / 'mols.tar', cache)
     print('Assets ready')
 

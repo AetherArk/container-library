@@ -13,4 +13,3 @@ def graph_check(src,dst):
  for b in src.GetBonds():
   other=dst.GetBondBetweenAtoms(match[b.GetBeginAtomIdx()],match[b.GetEndAtomIdx()]);require(other is not None and other.GetBondType()==b.GetBondType(),'mapped bond')
  return match
-
