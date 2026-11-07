@@ -1,48 +1,37 @@
 # Boltz2
 
 - Boltz 2.2.1 (`cb04aec`); Python 3.11; PyTorch 2.7.1/cu128; Linux x86-64.
-- Requires Docker, NVIDIA Container Toolkit, CUDA-12.8-compatible driver, and host Python 3.12+.
-- Weights stay external. Batch inference is offline; use trusted checkpoints/output files.
+
+## Prerequisites
+
+- NVIDIA GPU and CUDA-12.8-compatible driver.
+- [Docker](https://docs.docker.com/engine/install/) and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), configured for GPU access.
+- Git; host Python 3.12+ with pip/venv; Docker access for the current user.
+- GPU UUID: `nvidia-smi --query-gpu=uuid,name --format=csv`.
 
 ## Setup
 
-```sh
-cd cofolding/boltz2
-docker build -t container-library/boltz2:2.2.1 .
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-host.txt
-python3 fetch_assets.py --cache /path/to/cache --download
-```
+- Clone: `git clone https://github.com/AetherArk/container-library.git`.
+- Directory: `cd container-library/cofolding/boltz2`.
+- Build: `docker build -t container-library/boltz2:2.2.1 .` (no registry image yet).
+- Host environment: `python3 -m venv .venv && .venv/bin/pip install -r requirements-host.txt`.
+- Assets: `python3 fetch_assets.py --cache /path/to/cache --download`.
+- [Weights/data](https://huggingface.co/boltz-community/boltz-2): public, no login; downloader verifies pinned files and extracts chemical-component data. Downloads 6.2 GB, including affinity weights; allow additional space for extraction, image, and outputs.
+- Inference: offline; external weights; trusted checkpoints/output files only.
 
-- Source, base image, Python packages, and model assets are pinned; OS packages remain repository-resolved.
-- Asset extraction is atomic; incomplete/unmarked caches are refused. Omit `--download` to verify an existing cache.
+## Examples
 
-## Packaged examples
+- CYP: `.venv/bin/python run_test.py --case cyp --output /path/to/new-run --cache /path/to/cache --checkpoint /path/to/cache/boltz2_conf.ckpt --gpu GPU-UUID`.
+- PXR: replace `--case cyp` with `--case pxr`; use a separate output directory.
+- [Inputs/MSAs/settings](../test-cases/); [verified execution and output checks](TESTING.md).
+- Results: `OUTPUT/result.json`; structures, confidence arrays, full tensors, and verification under `OUTPUT/prediction/seed-11/`.
 
-```sh
-.venv/bin/python run_test.py --case cyp \
-  --output /path/to/new-cyp-test --cache /path/to/cache \
-  --checkpoint /path/to/cache/boltz2_conf.ckpt --gpu GPU-UUID
-# Repeat with --case pxr and a separate output directory.
-```
+## Custom inputs
 
-- Canonical inputs, original MSAs, method settings, and native output inventories: [test-cases](../test-cases/).
-- Pass requires the batch native structure, ligand/cofactor chemistry, and confidence verification.
-- Summary: `OUTPUT/result.json`; native outputs and `verified.json`: `OUTPUT/prediction/seed-11/`.
-- `--resume` rechecks the run's own outputs with identical inputs/settings; `--dry-run` stages inputs and prints the batch request without inference or a PASS report.
-- PXR and CYP examples passed GPU execution and native output verification; see [verification](TESTING.md).
-
-## Other inputs
-
-```sh
-.venv/bin/python batch.py --input examples --output /path/to/new-run \
-  --cache /path/to/cache --checkpoint /path/to/cache/boltz2_conf.ckpt \
-  --gpu GPU-UUID --seeds 0 --diffusion_samples 1 --no_kernels
-```
-
-- YAML directory: one protein chain, SMILES ligands, explicit empty/local A3M alignment.
-- One model load per seed. Saves native structures/confidence, full tensors, and verification receipts.
-- Templates, CCD inputs, constraints, and affinity require the native CLI; optional Compose configuration is supplied.
-- `--no_kernels`: tested Blackwell route. Packaged examples retain their native kernel setting.
-- Options: `batch.py --help`. Tests: `.venv/bin/python -m unittest discover -s tests -v`.
-- [Tested scope](TESTING.md). Code/weights: [Boltz MIT](licenses/Boltz-MIT.txt). No registry image published yet.
+- Run: `.venv/bin/python batch.py --input examples --output /path/to/new-run --cache /path/to/cache --checkpoint /path/to/cache/boltz2_conf.ckpt --gpu GPU-UUID --seeds 0 --diffusion_samples 1 --no_kernels`.
+- YAML directory: one protein chain per input, SMILES ligands, explicit `msa: empty` or local A3M. MSA generation is external.
+- Templates, CCD inputs, constraints, affinity: native CLI via [Compose](compose.yaml).
+- `--no_kernels`: tested Blackwell route; packaged examples use their configured kernels.
+- `--resume`: verify/reuse completed runs; `--dry-run`: stage inputs and print the request.
+- Options/resource limits: `batch.py --help`. CPU tests: `.venv/bin/python -m unittest discover -s tests -v`.
+- Code/weights: [MIT](licenses/Boltz-MIT.txt).
