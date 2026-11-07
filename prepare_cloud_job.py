@@ -112,6 +112,8 @@ def prepare(args, client=None):
         raise ValueError('--image requires an immutable name@sha256 digest')
     if not 60 <= args.expires_in <= 604800:
         raise ValueError('--expires-in must be 60..604800 seconds (S3 presign limit)')
+    if not 0 <= args.progress_slots <= 256 or not 10 <= args.progress_interval <= 3600:
+        raise ValueError('progress slots must be 0..256 and interval 10..3600 seconds')
     root, files = inspect_inputs(args.inputs)
     output = Path(args.output).expanduser().resolve()
     # Never recursively ingest earlier launch secrets into a new input bundle.
@@ -145,6 +147,8 @@ def prepare(args, client=None):
            'input_key': prefix + '/inputs/inputs.tar.gz', 'job_key': prefix + '/inputs/job.json',
            'result_key': result_prefix + '/results.tar', 'receipt_key': result_prefix + '/receipt.json',
            'claim_key': result_prefix + '/started.json'}
+    job['progress_interval_seconds'] = args.progress_interval
+    job['progress_keys'] = [result_prefix + f'/progress/{i:04d}.json' for i in range(args.progress_slots)]
     (output / 'job.json').write_bytes(json_bytes(job))
     if client is None:
         import boto3
@@ -186,7 +190,12 @@ def prepare(args, client=None):
         if method == 'put_object':
             params['IfNoneMatch'] = '*'
         urls[name] = client.generate_presigned_url(method, Params=params, ExpiresIn=remaining)
-    spec = {'job': job, 'urls': urls}
+    progress_urls = []
+    for key in job['progress_keys']:
+        progress_urls.append({
+            'put': client.generate_presigned_url('put_object', Params={'Bucket': args.bucket, 'Key': key, 'IfNoneMatch': '*'}, ExpiresIn=remaining),
+            'get': client.generate_presigned_url('get_object', Params={'Bucket': args.bucket, 'Key': key}, ExpiresIn=remaining)})
+    spec = {'job': job, 'urls': urls, 'progress_urls': progress_urls}
     environment = {'COFOLD_CLOUD_SPEC': json.dumps(spec, separators=(',', ':'))}
     private_json(output / 'runtime-env.secret.json', environment)
     private_json(output / 'deployment.secret.json', {'image': args.image,
@@ -207,6 +216,8 @@ def parser():
     p.add_argument('--experiment', default='test')
     p.add_argument('--image', required=True, help='immutable image name@sha256:digest')
     p.add_argument('--seeds', nargs='+', type=int, required=True)
+    p.add_argument('--progress-slots', type=int, default=0, help='optional bounded durable snapshots, 0..256 create-only keys')
+    p.add_argument('--progress-interval', type=int, default=60, help='seconds between snapshots, 10..3600')
     p.add_argument('--expires-in', type=int, default=86400, help='seconds including scheduling, inference, uploads and readback')
     for key, value in asdict(Settings()).items():
         flag = '--' + key.replace('_', '-')

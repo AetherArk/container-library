@@ -6,6 +6,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import time
+
+from .benchmark import timed_forward
 
 import numpy as np
 import torch
@@ -84,6 +87,7 @@ class NativeEngine:
         self.model = None
         self.cpu_to_gpu_transfer_count = 0
         self.checkpoint_load_count = 0
+        self.benchmark_metrics = None
         torch.set_grad_enabled(False)
         torch.set_float32_matmul_precision('highest')
         for key in ('CUEQ_DEFAULT_CONFIG', 'CUEQ_DISABLE_AOT_TUNING'):
@@ -169,6 +173,7 @@ class NativeEngine:
         self.checkpoint_load_count += 1
         self.model.eval().to(torch.device('cuda'))
         self.cpu_to_gpu_transfer_count += 1
+        torch.cuda.synchronize()
 
     def snapshot(self):
         params = [(name, str(p.device), p.data_ptr()) for name, p in self.model.named_parameters()]
@@ -182,36 +187,99 @@ class NativeEngine:
                 'cpu_to_gpu_transfer_count': self.cpu_to_gpu_transfer_count}
 
     def predict(self, prepared, attempt, seed):
+        assert self.model is not None
+        metrics = self.benchmark_metrics = {
+            'forward_seconds': [], 'forward_null_reason': 'forward_not_completed',
+            'predict_step_seconds': None, 'predict_step_null_reason': 'predict_step_not_completed',
+            'capture_hook_write_seconds': 0.0, 'output_write_seconds': 0.0,
+            'scope': 'input_seed_batch; forward excludes post-hook capture writes',
+            'torch_cuda_version': torch.version.cuda, 'cudnn_version': torch.backends.cudnn.version()}
+        metrics['torch_cuda_version_null_reason'] = None if metrics['torch_cuda_version'] is not None else 'not_a_cuda_build'
+        metrics['cudnn_version_null_reason'] = None if metrics['cudnn_version'] is not None else 'torch_cudnn_version_unavailable'
+        try:
+            device = torch.cuda.current_device()
+            properties = torch.cuda.get_device_properties(device)
+            metrics['cuda_device'] = {'logical_index': device, 'name': properties.name,
+                                      'uuid': str(properties.uuid) if getattr(properties, 'uuid', None) else None,
+                                      'uuid_null_reason': None if getattr(properties, 'uuid', None) else 'torch_property_unavailable',
+                                      'total_memory_bytes': properties.total_memory}
+        except Exception:
+            metrics['cuda_device'] = None
+            metrics['cuda_device_null_reason'] = 'torch_device_query_unavailable'
+        torch.cuda.synchronize()
+        metrics['allocator_baseline_bytes'] = {
+            'allocated': torch.cuda.memory_allocated(), 'reserved': torch.cuda.memory_reserved()}
+        torch.cuda.reset_peak_memory_stats()
+        metrics['allocator_peak_reset'] = True
         capture = attempt / 'capture'
         capture.mkdir()
+        begin = time.perf_counter()
         atomic_json(attempt / 'resolved_model_args.json', self.load_args)
         # Full per-parameter device/pointer evidence once per job; compact hashes
         # before/after every job in run.json bind ALL named parameters, not just one.
         atomic_json(attempt / 'model_parameters.json', {
             name: {'device': str(p.device), 'data_ptr': p.data_ptr()}
             for name, p in self.model.named_parameters()})
+        metrics['output_write_seconds'] += time.perf_counter() - begin
+        torch.cuda.synchronize()
+        begin = time.perf_counter()
         batch = prepared['module'].transfer_batch_to_device(prepared['batch'], self.model.device, 0)
+        torch.cuda.synchronize()
+        metrics['batch_transfer_seconds'] = time.perf_counter() - begin
+        begin = time.perf_counter()
         save_packet(capture, 'consumed_batch', batch)
+        metrics['output_write_seconds'] += time.perf_counter() - begin
         def capture_forward(module, args, result):
-            save_packet(capture, 'full_forward', result)
+            begin = time.perf_counter()
+            try:
+                save_packet(capture, 'full_forward', result)
+            finally:
+                metrics['capture_hook_write_seconds'] += time.perf_counter() - begin
+        original_forward = self.model.forward
+        had_forward_override = 'forward' in self.model.__dict__
+        self.model.forward = timed_forward(original_forward, torch.cuda.synchronize, metrics)
         hook = self.model.register_forward_hook(capture_forward)
         seed_everything(seed, workers=True)
         try:
-            with torch.inference_mode(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-                prediction = self.model.predict_step(batch, 0)
+            torch.cuda.synchronize()
+            begin = time.perf_counter()
+            try:
+                with torch.inference_mode(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                    prediction = self.model.predict_step(batch, 0)
+            finally:
+                torch.cuda.synchronize()
+                metrics['predict_step_seconds'] = time.perf_counter() - begin
+                metrics['predict_step_null_reason'] = None
+                if metrics['forward_seconds']:
+                    metrics['forward_null_reason'] = None
+            begin = time.perf_counter()
             saved = save_packet(capture, 'full_prediction', prediction)
+            metrics['output_write_seconds'] += time.perf_counter() - begin
             if saved['exception']:
                 raise RuntimeError('native predict_step reported a recoverable prediction exception')
             writer = BoltzWriter(data_dir=prepared['processed'] / 'structures',
                                  output_dir=prepared['native'] / 'predictions',
                                  output_format=self.settings.output_format, boltz2=True, write_embeddings=True)
-            writer.write_on_batch_end(None, None, saved, [0], batch, 0, 0)
-            torch.cuda.synchronize()
+            begin = time.perf_counter()
+            try:
+                writer.write_on_batch_end(None, None, saved, [0], batch, 0, 0)
+                torch.cuda.synchronize()
+            finally:
+                metrics['output_write_seconds'] += time.perf_counter() - begin
         finally:
             hook.remove()
+            if had_forward_override:
+                self.model.forward = original_forward
+            else:
+                del self.model.forward
+            metrics['allocator_peak_bytes'] = {
+                'allocated': torch.cuda.max_memory_allocated(), 'reserved': torch.cuda.max_memory_reserved()}
+            begin = time.perf_counter()
             atomic_json(attempt / 'model_parameters_after.json', {
                 name: {'device': str(p.device), 'data_ptr': p.data_ptr()}
                 for name, p in self.model.named_parameters()})
+            metrics['output_write_seconds'] += time.perf_counter() - begin
+            atomic_json(attempt / 'benchmark_metrics.json', metrics)
             # Never .cpu() the model or create a per-job Trainer.
             prepared['batch'] = None
             del batch
