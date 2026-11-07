@@ -64,5 +64,5 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertIn(value, text)
         tag = workflow('boltz2-publish.yml')['on']['workflow_dispatch']['inputs']['image_tag']['default']
         self.assertTrue(re.fullmatch(r'2\.2\.1-worker-[A-Za-z0-9][A-Za-z0-9_.-]*', tag))
-        self.assertEqual(tag, '2.2.1-worker-v2-cloud-rc1')
+        self.assertEqual(tag, '2.2.1-worker-v3-benchmark-rc1')
         self.assertIn('ARG CONTAINER_VERSION=' + tag, text)

@@ -9,6 +9,8 @@ import signal
 import tempfile
 import uuid
 
+from .benchmark import Benchmark, load_metadata, error_label
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -102,7 +104,7 @@ def completed(output, key, identity):
 
 
 def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
-        engine_factory=None, stop=None):
+        engine_factory=None, stop=None, benchmark_metadata=None):
     inputs, output, assets, checkpoint = map(Path, (inputs, output, assets, checkpoint))
     if not seeds or any(type(s) is not int or s < 0 or s > 4294967295 for s in seeds):
         raise ValueError('seeds must be explicit integers in [0, 4294967295]')
@@ -118,8 +120,9 @@ def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
     import fcntl
     with (output / '.worker.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return _run(sources, output, assets, checkpoint, seeds, settings, resume,
-                    engine_factory, stop or Stop())
+        with Benchmark(output, load_metadata(benchmark_metadata), sample_gpu=engine_factory is None) as benchmark:
+            return _run(sources, output, assets, checkpoint, seeds, settings, resume,
+                        engine_factory, stop or Stop(), benchmark)
 
 
 def asset_identity(assets):
@@ -141,9 +144,11 @@ def asset_identity(assets):
     return {'kind': 'files', 'sha256': digest.hexdigest()}
 
 
-def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_factory, stop):
-    checkpoint_identity = {'path': str(checkpoint.resolve()), 'sha256': sha(checkpoint)}
-    assets_identity = asset_identity(assets)
+def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_factory, stop, benchmark):
+    with benchmark.stage('identity_verification'):
+        checkpoint_hash = sha(checkpoint)
+        assets_identity = asset_identity(assets)
+    checkpoint_identity = {'path': str(checkpoint.resolve()), 'sha256': checkpoint_hash}
     implementation = {'image_id': os.environ.get('COFOLD_IMAGE_ID'),
                       'code': {str(p.relative_to(Path(__file__).parent.parent)): sha(p)
                                for folder in ('resident', 'batch_native')
@@ -160,7 +165,8 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                         'implementation': implementation, 'worker_version': 1}
             # Seed occurrence preserves even duplicate explicitly supplied seeds.
             key = hashlib.sha256(json.dumps([identity, occurrence], sort_keys=True).encode()).hexdigest()
-            jobs.append({'input': str(source), 'seed': seed, 'status': 'pending', 'output': None,
+            jobs.append({'input': str(source), 'seed': seed, 'seed_occurrence': occurrence,
+                         'job_index': len(jobs), 'status': 'pending', 'output': None,
                          'identity': identity, 'key': key, 'reused': False})
     meta = {'requested_seeds': seeds, 'settings': asdict(settings), 'checkpoint': checkpoint_identity,
             'assets': assets_identity,
@@ -170,10 +176,28 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
     loaded = False
     active = [None]
     counts = {'completed': 0, 'failed': 0}
+    emitted = set()
+    def record(job):
+        if job['key'] in emitted:
+            return
+        emitted.add(job['key'])
+        for sample_index in range(settings.samples):
+            benchmark.append('predictions.jsonl', {
+                'job_key': job['key'], 'input': job['input'], 'seed': job['seed'],
+                'sample_index': sample_index, 'seed_occurrence': job['seed_occurrence'],
+                'job_index': job['job_index'], 'status': job['status'], 'reused': job['reused'],
+                'verified': job['status'] == 'completed',
+                'model_was_loaded_before_cell': job.get('model_was_loaded_before_cell'),
+                'output': job['output'], 'metrics_scope': 'input_seed_batch_not_individual_sample',
+                'metrics': job.get('benchmark_metrics'),
+                'metrics_null_reason': ('reused_not_measured' if job['reused'] else 'native_metrics_unavailable')
+                    if not job.get('benchmark_metrics') else None})
     def save(final=False):
         # Keep live updates bounded; rewriting all jobs after every transition
         # would make metadata I/O quadratic for large input directories.
         current = active[0]
+        if current and current['status'] in ('completed', 'failed'):
+            record(current)
         atomic_json(output / 'progress.json', {
             'status': meta['status'], 'jobs_total': len(jobs),
             'jobs_completed': counts['completed'], 'jobs_failed': counts['failed'],
@@ -187,7 +211,8 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
             active[0] = job
             if stop.requested:
                 break
-            prior = completed(output, job['key'], job['identity']) if resume else None
+            with benchmark.stage('resume_verification', job_key=job['key']):
+                prior = completed(output, job['key'], job['identity']) if resume else None
             if prior is not None:
                 job.update(status='completed', output=str(prior.relative_to(output)), reused=True)
                 counts['completed'] += 1
@@ -195,19 +220,23 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 continue
             attempt = output / 'jobs' / job['key'] / uuid.uuid4().hex
             attempt.mkdir(parents=True)
-            job.update(output=str(attempt.relative_to(output)), status='preparing')
+            job.update(output=str(attempt.relative_to(output)), status='preparing', model_was_loaded_before_cell=loaded)
             save()
             try:
+                if engine is not None:
+                    engine.benchmark_metrics = None
                 if engine is None:
-                    if engine_factory is None:
-                        from .native import NativeEngine
-                        engine_factory = NativeEngine
-                    engine = engine_factory(assets, checkpoint, settings)
-                prepared = engine.prepare(Path(job['input']), attempt, job['seed'])
+                    with benchmark.stage('initialization'):
+                        if engine_factory is None:
+                            from .native import NativeEngine
+                            engine_factory = NativeEngine
+                        engine = engine_factory(assets, checkpoint, settings)
+                with benchmark.stage('preparation', job_key=job['key']):
+                    prepared = engine.prepare(Path(job['input']), attempt, job['seed'])
                 if input_identity(Path(job['input'])) != job['identity']['input']:
                     raise ValueError('input or referenced assets changed during preparation')
             except Exception as exc:
-                job.update(status='failed', phase='preparation', error=f'{type(exc).__name__}: {exc}')
+                job.update(status='failed', phase='preparation', error=error_label(exc))
                 counts['failed'] += 1
                 atomic_json(attempt / 'receipt.json', job)
                 save()
@@ -216,23 +245,27 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 if not loaded:
                     job['status'] = 'loading'
                     save()
-                    engine.load()
+                    with benchmark.stage('load', job_key=job['key']):
+                        engine.load()
                     loaded = True
                     meta['checkpoint_load_count'] += 1
                     meta['model'] = engine.snapshot()
                 job.update(status='predicting', model_before=engine.snapshot())
                 save()
-                engine.predict(prepared, attempt, job['seed'])
-                engine.verify(prepared, attempt)
+                with benchmark.stage('prediction', job_key=job['key']):
+                    engine.predict(prepared, attempt, job['seed'])
+                with benchmark.stage('verification', job_key=job['key']):
+                    engine.verify(prepared, attempt)
                 job['model_after'] = engine.snapshot()
                 if job['model_before'] != job['model_after']:
                     raise RuntimeError('resident model identity/device/storage changed')
                 job['status'] = 'completed'
-                atomic_json(attempt / 'receipt.json', {'status': 'completed', 'identity': job['identity'],
-                                                       'sha256': inventory(attempt)})
+                with benchmark.stage('receipt_verification_and_write', job_key=job['key']):
+                    atomic_json(attempt / 'receipt.json', {'status': 'completed', 'identity': job['identity'],
+                                                           'sha256': inventory(attempt)})
                 counts['completed'] += 1
             except Exception as exc:
-                job.update(status='failed', phase='prediction', error=f'{type(exc).__name__}: {exc}')
+                job.update(status='failed', phase='prediction', error=error_label(exc))
                 counts['failed'] += 1
                 if loaded:
                     job['model_after'] = engine.snapshot()
@@ -241,16 +274,26 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                     meta['status'] = 'fatal'
                     break
             finally:
+                job['benchmark_metrics'] = getattr(engine, 'benchmark_metrics', None)
+                benchmark.event('prediction_terminal', job_key=job['key'], status=job['status'])
                 if engine is not None and hasattr(engine, 'checkpoint_load_count'):
                     meta['checkpoint_load_count'] = engine.checkpoint_load_count
                 save()
         if meta['status'] != 'fatal':
             meta['status'] = 'stopped' if stop.requested else ('completed' if all(j['status'] == 'completed' for j in jobs) else 'failed')
     except BaseException as exc:
-        meta.update(status='fatal', error=f'{type(exc).__name__}: {exc}')
+        meta.update(status='fatal', error=error_label(exc))
         raise
     finally:
         save(final=True)
+        benchmark.summary.update(status=meta['status'], checkpoint_load_count=meta['checkpoint_load_count'],
+                                 jobs_total=len(jobs), jobs_completed=counts['completed'], jobs_failed=counts['failed'],
+                                 requested_predictions=len(jobs) * settings.samples,
+                                 verified_predictions=counts['completed'] * settings.samples,
+                                 requested_seeds=seeds, settings=asdict(settings),
+                                 checkpoint=checkpoint_identity, assets=assets_identity, implementation=implementation)
+        for job in jobs:
+            record(job)
     return 143 if meta['status'] == 'stopped' else (0 if meta['status'] == 'completed' else 1)
 
 
@@ -267,12 +310,13 @@ def main():
     parser.add_argument('--use-potentials', action='store_true')
     parser.add_argument('--output-format', choices=('mmcif', 'pdb'), default='mmcif')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
     args = parser.parse_args()
     stop = Stop()
     previous = signal.signal(signal.SIGTERM, lambda *_: setattr(stop, 'requested', True))
     try:
         settings = Settings(**{key: getattr(args, key) for key in Settings.__dataclass_fields__})
-        return run(args.input, args.output, args.assets, args.checkpoint, args.seeds, settings, args.resume, stop=stop)
+        return run(args.input, args.output, args.assets, args.checkpoint, args.seeds, settings, args.resume, stop=stop, benchmark_metadata=args.benchmark_metadata)
     finally:
         signal.signal(signal.SIGTERM, previous)
 

@@ -149,6 +149,25 @@ not stop billing or the group's restart policy. Do not leave deterministic
 restarts spinning. To retry, prepare a fresh payload/new attempt; never reuse the
 old signed URLs. This repository does not implement Salad lifecycle/monitoring.
 
+## Benchmark and optional interruption evidence
+
+The worker emits provider-independent `benchmark.json`, `predictions.jsonl` and
+`events.jsonl`; the wrapper preserves them in the full archive and relays selected
+structured worker events to stdout. Use host preparation options
+`--progress-slots 120 --progress-interval 60` for bounded optional create-only
+presigned snapshot PUT/GET slots, including periodic live progress/telemetry.
+Default zero slots means no live cloud uploads; local mounted inference needs no
+network or provider metadata. The wrapper captures only the eight documented Salad
+identifier variables before stripping the child environment, passing sanitized
+metadata by local JSON file. Generic optional `--benchmark-metadata` is also
+available. No provider auth key is needed inside the image.
+
+See [benchmark schema, exact timer scopes, null reasons and interruption limits](resident/BENCHMARK.md).
+Only successfully stored snapshots survive node loss; snapshot upload/readback
+failures never claim durable success or stop otherwise valid inference. Full
+science tensors are still durable remotely only after final archive upload.
+Result/receipt semantics and explicit provider shutdown responsibility are unchanged.
+
 ## Tests (no paid deployment)
 
 ```sh

@@ -5,7 +5,7 @@ on:
       image_tag:
         description: Explicit container release tag; use a new tag for each release
         required: true
-        default: 2.2.1-worker-v2-cloud-rc1
+        default: 2.2.1-worker-v3-benchmark-rc1
         type: string
 permissions:
   contents: read

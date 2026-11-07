@@ -21,6 +21,7 @@
 - Raw structures, confidence/embedding arrays, consumed features, full forward/prediction tensors.
 - `run.json`: inputs, seeds, settings, job outcomes, checkpoint/model identity; provisional metadata format.
 - `progress.json`: lightweight live status; full `run.json` written at start and termination.
+- `benchmark.json`, append-only `predictions.jsonl` and `events.jsonl`: provider-independent hardware, stage timers, per-cell memory and sampled GPU observations. See [schema, timer scopes, optional metadata and durability](BENCHMARK.md).
 - Job attempts: `jobs/<identity-key>/<attempt-id>/`; completion receipt and parameter-device/pointer snapshots.
 
 ## Recovery

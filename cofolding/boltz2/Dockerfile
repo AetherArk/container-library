@@ -45,7 +45,7 @@ WORKDIR /work
 ENTRYPOINT ["cofold-run"]
 CMD ["--help"]
 ARG CONTAINER_REVISION=unknown
-ARG CONTAINER_VERSION=2.2.1-worker-v2-cloud-rc1
+ARG CONTAINER_VERSION=2.2.1-worker-v3-benchmark-rc1
 LABEL org.opencontainers.image.title="Boltz2" \
       org.opencontainers.image.version="${CONTAINER_VERSION}" \
       org.opencontainers.image.revision="${CONTAINER_REVISION}" \
