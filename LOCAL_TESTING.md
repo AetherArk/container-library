@@ -19,6 +19,8 @@
 
 - `python3 scripts/test_local.py --suite image --image container-library/boltz2:single-load-dev`.
 - Installed entry point and imports; no GPU or host implementation-code mounts.
+- Cloud installed command/imports: `python3 scripts/test_local.py --suite image-cloud --image container-library/boltz2:single-load-dev`.
+- CPU suite also discovers cloud transport tests (local HTTP + explicitly fake worker; no R2, GPU or inference). See [cloud jobs](cofolding/boltz2/CLOUD_JOBS.md).
 
 ## GPU
 

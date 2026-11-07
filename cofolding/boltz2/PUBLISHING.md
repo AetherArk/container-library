@@ -3,7 +3,7 @@
 ## Prepared workflow
 
 - `.github/workflows/boltz2-publish.yml`: manual dispatch only; no automatic publication on push/PR.
-- Target: `ghcr.io/aetherark/boltz2:2.2.1-worker-v1-rc1`; Linux amd64.
+- Target: `ghcr.io/aetherark/boltz2:2.2.1-worker-v2-cloud-rc1`; Linux amd64. Preserve the previously published `2.2.1-worker-v1-rc1` image.
 - Order: CPU tests → image build → installed-image checks → push → pull by registry digest → installed-image checks and source-label verification.
 - Credentials: built-in `GITHUB_TOKEN`, job-scoped `packages: write`; no PAT/secret required.
 - Labels distinguish container-library revision/release from upstream Boltz revision.

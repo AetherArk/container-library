@@ -11,6 +11,11 @@
 - `cofold-run --input /inputs --output /outputs --assets /models --checkpoint /checkpoint --seeds 11 12 --no-kernels`.
 - Shared host launcher and local tests: [LOCAL_TESTING.md](../../../LOCAL_TESTING.md).
 
+## Cloud transport
+
+- `cofold-cloud-run` downloads a per-job input bundle and invokes this unchanged worker once; [preparation, private launch payloads and result validation](../CLOUD_JOBS.md).
+- Default/local `cofold-run` behavior is unchanged.
+
 ## Outputs
 
 - Raw structures, confidence/embedding arrays, consumed features, full forward/prediction tensors.

@@ -88,7 +88,7 @@ def verify_gpu(output, inputs, checkpoint, seeds, samples, output_format):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--suite', required=True, choices=('cpu', 'image', 'gpu'))
+    p.add_argument('--suite', required=True, choices=('cpu', 'image', 'image-cloud', 'gpu'))
     p.add_argument('--image')
     for name in ('inputs', 'assets', 'checkpoint', 'output', 'gpu'):
         p.add_argument('--' + name)
@@ -115,7 +115,7 @@ def main(argv=None):
         return int(failed)
     if not a.image:
         p.error('--image is required for image/gpu suites (explicit installed candidate)')
-    if a.suite == 'image':
+    if a.suite in ('image', 'image-cloud'):
         identity = launcher.resolve_image(a.image)
         common = ['docker', 'run', '--rm', '--pull=never', '--network=none',
                   '--user', f'{os.getuid()}:{os.getgid()}', '--cpus', str(a.cpus), '--memory', a.memory,
@@ -124,6 +124,14 @@ def main(argv=None):
                   '--env', 'XDG_CACHE_HOME=/tmp/cache', '--env', 'NUMBA_CACHE_DIR=/tmp/numba',
                   '--env', 'TRITON_CACHE_DIR=/tmp/triton', '--env', 'HF_HOME=/tmp/hf',
                   '--env', 'CUDA_VISIBLE_DEVICES=', '--env', 'NVIDIA_VISIBLE_DEVICES=void']
+        if a.suite == 'image-cloud':
+            run(common + ['--entrypoint', 'cofold-cloud-run', identity, '--help'])
+            run(common + ['--entrypoint', 'python', identity, '-c',
+                          'import cloud_job, fetch_assets; from pathlib import Path; '
+                          'assert Path(fetch_assets.__file__).with_name("assets.json").is_file(); '
+                          'assert cloud_job.worker_command; print("installed cloud imports/assets OK")'])
+            print('Installed cloud CPU smoke checks passed; no network, GPU or source mounts used')
+            return 0
         run(common + ['--entrypoint', 'cofold-run', identity, '--help'])
         run(common + ['--entrypoint', 'python', identity, '-c',
                       'import torch, boltz; import resident.worker; import resident.native; '

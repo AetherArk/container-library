@@ -27,6 +27,10 @@ RUN git init /opt/boltz \
 # Keep the native boltz CLI; add the common persistent-worker entrypoint.
 COPY resident /opt/cofold/resident
 COPY batch_native /opt/cofold/batch_native
+COPY cloud_job.py fetch_assets.py assets.json /opt/cofold/
+COPY cofold-cloud-run /opt/cofold/cofold-cloud-run
+RUN chmod 755 /opt/cofold/cofold-cloud-run \
+ && ln -s /opt/cofold/cofold-cloud-run /opt/venv/bin/cofold-cloud-run
 RUN chmod 755 /opt/cofold/resident/cofold-run \
  && ln -s /opt/cofold/resident/cofold-run /opt/venv/bin/cofold-run
 ENV PYTHONPATH=/opt/cofold
@@ -41,7 +45,7 @@ WORKDIR /work
 ENTRYPOINT ["cofold-run"]
 CMD ["--help"]
 ARG CONTAINER_REVISION=unknown
-ARG CONTAINER_VERSION=2.2.1-worker-v1-rc1
+ARG CONTAINER_VERSION=2.2.1-worker-v2-cloud-rc1
 LABEL org.opencontainers.image.title="Boltz2" \
       org.opencontainers.image.version="${CONTAINER_VERSION}" \
       org.opencontainers.image.revision="${CONTAINER_REVISION}" \

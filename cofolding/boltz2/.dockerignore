@@ -1,6 +1,10 @@
 *
 !Dockerfile
 !requirements.lock
+!cloud_job.py
+!cofold-cloud-run
+!fetch_assets.py
+!assets.json
 !resident/
 !resident/**
 !batch_native/
