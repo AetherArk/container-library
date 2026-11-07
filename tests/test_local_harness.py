@@ -24,6 +24,17 @@ class CoverageTests(unittest.TestCase):
                 self.assertIn(value, command)
             self.assertNotIn('--gpus', command)
 
+    def test_cloud_image_checks_preserve_offline_no_source_mounts(self):
+        with patch.object(harness.launcher, 'resolve_image', return_value='sha256:' + 'a' * 64), patch.object(harness, 'run') as run:
+            self.assertEqual(harness.main(['--suite', 'image-cloud', '--image', 'unit-only']), 0)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn('cofold-cloud-run', run.call_args_list[0].args[0])
+        for call in run.call_args_list:
+            self.assertIn('--network=none', call.args[0])
+            self.assertIn('--pull=never', call.args[0])
+            self.assertNotIn('--mount', call.args[0])
+            self.assertNotIn('--gpus', call.args[0])
+
     def test_duplicate_seed_occurrences_are_preserved(self):
         jobs = [{'input': '/inputs/a.yaml', 'seed': seed} for seed in [12, 11, 12]]
         self.assertTrue(harness.coverage_matches(jobs, ['a.yaml'], [12, 11, 12]))

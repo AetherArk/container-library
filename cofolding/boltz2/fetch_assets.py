@@ -60,12 +60,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--cache', type=Path, required=True)
     p.add_argument('--download', action='store_true')
+    p.add_argument('--structure-only', action='store_true', help='omit unused affinity weights; default still verifies all assets')
     a = p.parse_args()
     manifest = json.loads(Path(__file__).with_name('assets.json').read_text())
     cache = a.cache.expanduser().resolve()
     if a.download:
         cache.mkdir(parents=True, exist_ok=True)
     for name, spec in manifest['files'].items():
+        if a.structure_only and name == 'boltz2_aff.ckpt':
+            continue
         target = cache / name
         if not target.exists() and a.download:
             url = f"https://huggingface.co/{manifest['repository']}/resolve/{manifest['revision']}/{name}"

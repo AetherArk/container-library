@@ -38,10 +38,14 @@ class ReleasePackagingTests(unittest.TestCase):
         for value in ('CONTAINER_REVISION="$GITHUB_SHA"', 'CONTAINER_VERSION="$RELEASE_TAG"', 'docker pull "$PUBLISHED_IMAGE"'):
             self.assertIn(value, text)
         self.assertNotIn(':latest', text)
-        checks = [line.strip() for line in text.splitlines() if line.strip().startswith('python scripts/test_local.py --suite image')]
-        self.assertEqual(len(checks), 2)
-        for command in checks:
-            self.assertIn('--cpus 2 --image', command)
+        for suite in ('image', 'image-cloud'):
+            checks = [line.strip() for line in text.splitlines()
+                      if line.strip().startswith('python scripts/test_local.py --suite ' + suite + ' ')]
+            self.assertEqual(len(checks), 2)
+            self.assertTrue(any('"$IMAGE:$RELEASE_TAG"' in command for command in checks))
+            self.assertTrue(any('"$PUBLISHED_IMAGE"' in command for command in checks))
+            for command in checks:
+                self.assertIn('--cpus 2 --image', command)
 
     def test_actions_are_pinned_and_shell_scripts_parse(self):
         for file in ('boltz2.yml', 'boltz2-publish.yml'):
@@ -60,3 +64,5 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertIn(value, text)
         tag = workflow('boltz2-publish.yml')['on']['workflow_dispatch']['inputs']['image_tag']['default']
         self.assertTrue(re.fullmatch(r'2\.2\.1-worker-[A-Za-z0-9][A-Za-z0-9_.-]*', tag))
+        self.assertEqual(tag, '2.2.1-worker-v2-cloud-rc1')
+        self.assertIn('ARG CONTAINER_VERSION=' + tag, text)

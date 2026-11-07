@@ -5,4 +5,4 @@
 - Repository code: MIT; bundled upstream and dependency notices retain their own terms.
 
 ## Cofolding methods: [cofolding/](cofolding/).
-  - Boltz2
+  - Boltz2: [local](cofolding/boltz2/README.md), [cloud input/output preparation](cofolding/boltz2/CLOUD_JOBS.md)

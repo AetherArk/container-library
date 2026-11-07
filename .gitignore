@@ -12,3 +12,6 @@ weights/
 *.pt
 *.tar
 *.tar.gz
+# Presigned capabilities: private local preparation payloads.
+*.secret.json
+cloud-jobs/
