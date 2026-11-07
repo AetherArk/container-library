@@ -119,6 +119,10 @@ def main(argv=None):
         identity = launcher.resolve_image(a.image)
         common = ['docker', 'run', '--rm', '--pull=never', '--network=none',
                   '--user', f'{os.getuid()}:{os.getgid()}', '--cpus', str(a.cpus), '--memory', a.memory,
+                  '--tmpfs', '/tmp:rw,nosuid,nodev,mode=1777,size=1g', '--workdir', '/tmp',
+                  '--env', 'HOME=/tmp', '--env', 'TMPDIR=/tmp',
+                  '--env', 'XDG_CACHE_HOME=/tmp/cache', '--env', 'NUMBA_CACHE_DIR=/tmp/numba',
+                  '--env', 'TRITON_CACHE_DIR=/tmp/triton', '--env', 'HF_HOME=/tmp/hf',
                   '--env', 'CUDA_VISIBLE_DEVICES=', '--env', 'NVIDIA_VISIBLE_DEVICES=void']
         run(common + ['--entrypoint', 'cofold-run', identity, '--help'])
         run(common + ['--entrypoint', 'python', identity, '-c',
