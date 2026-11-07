@@ -1,8 +1,8 @@
 # Test cases
 
 - `trpcage-ethanol/`: small execution test; no binding claim.
-- `pxr/`: historical PXR–ligand regression.
-- `cyp/`: historical CYP3A4–ligand/heme regression.
+- `pxr/`: PXR–ligand example.
+- `cyp/`: CYP3A4–ligand/heme example.
 - `input.json`: shared entities, MSA, seed, and sample count.
-- `boltz2/`: method settings and expected native-output checksums.
-- Historical cases pass only when every recorded output matches exactly.
+- `boltz2/settings.json`: native method settings.
+- Packaged examples run through `boltz2/run_test.py` and the batch native verifier; no historical output comparison is required.

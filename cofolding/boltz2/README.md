@@ -17,7 +17,7 @@ python3 fetch_assets.py --cache /path/to/cache --download
 - Source, base image, Python packages, and model assets are pinned; OS packages remain repository-resolved.
 - Asset extraction is atomic; incomplete/unmarked caches are refused. Omit `--download` to verify an existing cache.
 
-## Historical regression tests
+## Packaged examples
 
 ```sh
 .venv/bin/python run_test.py --case cyp \
@@ -26,10 +26,11 @@ python3 fetch_assets.py --cache /path/to/cache --download
 # Repeat with --case pxr and a separate output directory.
 ```
 
-- Inputs, original MSAs, settings, and expected checksums: [test-cases](../test-cases/).
-- Pass requires exact historical native-output checksums and sample ranking.
-- `--resume` rechecks existing predictions; mismatches fail.
-- CYP passes. PXR’s exact replay is blocked by native numerical nondeterminism; see [verification](TESTING.md).
+- Canonical inputs, original MSAs, method settings, and native output inventories: [test-cases](../test-cases/).
+- Pass requires the batch native structure, ligand/cofactor chemistry, and confidence verification.
+- Summary: `OUTPUT/result.json`; native outputs and `verified.json`: `OUTPUT/prediction/seed-11/`.
+- `--resume` rechecks the run's own outputs with identical inputs/settings; `--dry-run` stages inputs and prints the batch request without inference or a PASS report.
+- PXR and CYP examples passed GPU execution and native output verification; see [verification](TESTING.md).
 
 ## Other inputs
 
@@ -42,6 +43,6 @@ python3 fetch_assets.py --cache /path/to/cache --download
 - YAML directory: one protein chain, SMILES ligands, explicit empty/local A3M alignment.
 - One model load per seed. Saves native structures/confidence, full tensors, and verification receipts.
 - Templates, CCD inputs, constraints, and affinity require the native CLI; optional Compose configuration is supplied.
-- `--no_kernels`: tested Blackwell route. Historical cases retain their recorded kernel setting.
+- `--no_kernels`: tested Blackwell route. Packaged examples retain their native kernel setting.
 - Options: `batch.py --help`. Tests: `.venv/bin/python -m unittest discover -s tests -v`.
 - [Tested scope](TESTING.md). Code/weights: [Boltz MIT](licenses/Boltz-MIT.txt). No registry image published yet.

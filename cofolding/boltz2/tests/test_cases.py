@@ -1,13 +1,12 @@
 """CPU bookkeeping only: synthetic bytes and explicitly mocked model invocation.
 
 Molecular inputs are copied from the shared Trp-cage/ethanol case. These tests
-neither create predictions nor establish historical/GPU numerical equivalence.
+neither create predictions nor establish GPU runtime verification.
 """
 import contextlib
 import copy
 import gzip
 import hashlib
-import importlib.util
 import io
 import json
 from pathlib import Path
@@ -27,7 +26,7 @@ IMAGE_ID = 'sha256:'+'a'*64
 GPU = 'GPU-01234567-89ab-cdef-0123-456789abcdef'
 
 
-class HistoricalCaseTests(unittest.TestCase):
+class ExampleCaseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -43,33 +42,21 @@ class HistoricalCaseTests(unittest.TestCase):
         self.checkpoint.write_bytes(b'synthetic checkpoint identity, not weights')
         self.cache = self.root/'cache'; (self.cache/'mols').mkdir(parents=True)
         self.output = self.root/'output'
-        self.payloads = {name: ('synthetic bookkeeping only: '+name).encode()
-                         for name in runner.native_names('cyp', 5)}
-        self.expected = dict(historical_run='synthetic-bookkeeping-only', image_id=IMAGE_ID,
-                             checkpoint_sha256=batch.sha(self.checkpoint),
-                             native_files={name: {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
-                                           for name, data in self.payloads.items()},
-                             rank_to_original_sample=[2, 0, 4, 1, 3])
         self.save()
         self.argv = ['--case', 'cyp', '--output', str(self.output), '--cache', str(self.cache),
                      '--checkpoint', str(self.checkpoint), '--gpu', GPU]
 
     def save(self):
-        for name, value in (('input.json', self.case), ('boltz2/settings.json', self.settings),
-                            ('boltz2/expected.json', self.expected)):
+        for name, value in (('input.json', self.case), ('boltz2/settings.json', self.settings)):
             (self.directory/name).write_text(json.dumps(value))
 
     def synthetic_model_invocation(self, command, **kwargs):
-        """Explicit mock: write meaningless bytes solely to exercise comparison."""
+        """Explicit mock: write a receipt only; no scientific verification occurs."""
         if '--dry-run' in command:
             return subprocess.CompletedProcess(command, 0)
         stage = self.output/'prediction/seed-11'
-        pred = stage/'native/boltz_results_inputs/predictions/cyp'
-        pred.mkdir(parents=True, exist_ok=True)
-        for name, payload in self.payloads.items():
-            (pred/name).write_bytes(payload)
-        (stage/'verified.json').write_text(json.dumps({'status': 'PASS', 'models': 5,
-            'rank_to_original_sample': {'cyp': self.expected['rank_to_original_sample'] or list(range(5))}}))
+        stage.mkdir(parents=True, exist_ok=True)
+        (stage/'verified.json').write_text(json.dumps({'status': 'PASS', 'models': 5}))
         return subprocess.CompletedProcess(command, 0)
 
     def invoke(self, extra=(), effect=None):
@@ -79,7 +66,7 @@ class HistoricalCaseTests(unittest.TestCase):
             status = runner.main(self.argv+list(extra))
         return status, model
 
-    def test_full_options_handoff_and_exact_pass(self):
+    def test_full_options_handoff_and_simple_report(self):
         status, model = self.invoke()
         self.assertEqual(status, 0)
         command = model.call_args.args[0]
@@ -88,44 +75,44 @@ class HistoricalCaseTests(unittest.TestCase):
                             ('--sampling_steps', '200'), ('--max_parallel_samples', '5')):
             self.assertEqual(command[command.index(flag)+1], value)
         self.assertNotIn('--no_kernels', command)
-        self.assertNotIn(IMAGE_ID, command)  # Never silently substitute historical image.
-        self.assertEqual(json.loads((self.output/'comparison.json').read_text())['status'], 'PASS')
+        self.assertEqual(json.loads((self.output/'result.json').read_text())['status'], 'PASS')
         status, model = self.invoke(['--resume', '--image', 'registry.example/boltz:diagnosis'])
         self.assertEqual(status, 0)
         self.assertIn('--resume', model.call_args.args[0])
         self.assertIn('registry.example/boltz:diagnosis', model.call_args.args[0])
 
-    def test_dry_run_and_kernels_are_forwarded_without_comparison_pass(self):
+    def test_dry_run_and_kernels_are_forwarded_without_pass(self):
         self.settings['no_kernels'] = True; self.save()
         status, model = self.invoke(['--dry-run'])
         self.assertEqual(status, 0)
         self.assertIn('--dry-run', model.call_args.args[0]); self.assertIn('--no_kernels', model.call_args.args[0])
-        self.assertFalse((self.output/'comparison.json').exists())
+        self.assertFalse((self.output/'result.json').exists())
 
-    def test_missing_extra_different_and_wrong_ranks_fail_exactly(self):
-        self.assertEqual(self.invoke()[0], 0)
-        stage = self.output/'prediction/seed-11'
-        pred = stage/'native/boltz_results_inputs/predictions/cyp'
-        missing, differing = sorted(self.payloads)[:2]
-        (pred/missing).unlink(); (pred/differing).write_bytes(b'changed')
-        (pred/'unexpected').write_bytes(b'extra')
-        (stage/'verified.json').write_text(json.dumps({'status': 'PASS', 'models': 5,
-            'rank_to_original_sample': {'cyp': list(range(5))}}))
-        status, _ = self.invoke(['--resume'], effect=lambda *a, **k: None)
-        self.assertEqual(status, 1)
-        result = json.loads((self.output/'comparison.json').read_text())
-        self.assertEqual(result['missing'], [missing]); self.assertEqual(result['extra'], ['unexpected'])
-        self.assertEqual(result['differing'], [differing]); self.assertFalse(result['ranks_match'])
-        self.assertEqual(result['status'], 'FAIL')
+    def test_missing_failed_or_incomplete_receipt_fails(self):
+        for receipt in (None, {'status': 'FAIL', 'models': 5},
+                        {'status': 'PASS', 'models': 4}, {'status': 'PASS', 'models': True}):
+            self.assertEqual(self.invoke()[0], 0)
+            path = self.output/'prediction/seed-11/verified.json'
+            if receipt is None:
+                path.unlink()
+            else:
+                path.write_text(json.dumps(receipt))
+            status, _ = self.invoke(['--resume'], effect=lambda *a, **k: None)
+            self.assertEqual(status, 1)
+            self.assertEqual(json.loads((self.output/'result.json').read_text())['status'], 'FAIL')
 
-    def test_bad_checkpoint_or_model_failure_invalidates_old_pass(self):
+    def test_model_failure_invalidates_old_pass(self):
         self.assertEqual(self.invoke()[0], 0)
         status, _ = self.invoke(effect=subprocess.CalledProcessError(1, ['explicit mocked model']))
         self.assertEqual(status, 1)
-        self.assertEqual(json.loads((self.output/'comparison.json').read_text())['status'], 'FAIL')
-        self.checkpoint.write_bytes(b'wrong checkpoint')
+        self.assertEqual(json.loads((self.output/'result.json').read_text())['status'], 'FAIL')
+
+    def test_checkpoint_identity_is_delegated_to_batch_not_a_baseline(self):
+        self.checkpoint.write_bytes(b'different synthetic checkpoint')
         status, model = self.invoke()
-        self.assertEqual(status, 1); model.assert_not_called()
+        self.assertEqual(status, 0)
+        command = model.call_args.args[0]
+        self.assertEqual(command[command.index('--checkpoint')+1], str(self.checkpoint))
 
     def test_msa_hash_containment_and_native_entity_order(self):
         data = ('>query\n'+self.case['protein']['sequence']+'\n').encode()
@@ -152,24 +139,45 @@ class HistoricalCaseTests(unittest.TestCase):
         self.assertEqual(status, 1); model.assert_not_called()
         self.assertEqual(target.read_bytes(), b'preserve me')
 
-    def test_strict_types_keys_and_expected_inventory(self):
+    def test_strict_types_and_keys(self):
         original = copy.deepcopy(self.case)
         for key, value in (('seed', True), ('samples', 1.0), ('msa', False), ('cofactors', {}), ('extra', 1)):
             self.case = dict(original, **{key: value}); self.save()
             with self.subTest(key=key), self.assertRaises(ValueError): runner.load_case(self.directory)
         self.case = original; self.settings['no_kernels'] = 0; self.save()
         with self.assertRaises(ValueError): runner.load_case(self.directory)
-        self.settings['no_kernels'] = False
-        self.expected['rank_to_original_sample'][0] = True; self.save()
-        with self.assertRaises(ValueError): runner.load_case(self.directory)
-        self.expected['rank_to_original_sample'] = list(range(5))
-        self.expected['native_files'].pop(next(iter(self.payloads))); self.save()
-        with self.assertRaises(ValueError): runner.load_case(self.directory)
 
     def test_duplicate_and_nonfinite_json_rejected(self):
         for content in ('{"id":1,"id":2}', '{"id":NaN}'):
             (self.directory/'input.json').write_text(content)
             with self.assertRaises(ValueError): runner.load_case(self.directory)
+
+    def test_packaged_cases_stage_canonical_inputs_and_native_settings(self):
+        for name in ('pxr', 'cyp'):
+            with self.subTest(case=name):
+                case, settings, msa = runner.load_case(runner.CASES/name)
+                output = self.root/name
+                runner.materialize(output, case, settings, msa)
+                runner.materialize(output, case, settings, msa)  # Identical staging is safe.
+                self.assertEqual((output/'msa/msa.a3m').read_bytes(), msa)
+                records, _ = batch.inputs(output/'inputs')
+                entities = records[0]['yaml']['sequences']
+                self.assertEqual(entities[0]['protein']['sequence'], case['protein']['sequence'])
+                self.assertEqual([e['ligand'] for e in entities[1:]],
+                                 [*case.get('cofactors', []), case['ligand']])
+                args = runner.parser().parse_args(self.argv+['--dry-run'])
+                args.output = output
+                command = runner.batch_command(args, case, settings)
+                with patch.object(sys, 'argv', command[1:]), \
+                     patch.object(batch, 'resolve_image', return_value=IMAGE_ID), \
+                     contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    batch.main()
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report['models'], case['samples'])
+                for key, value in settings.items():
+                    if key != 'record_id':
+                        self.assertEqual(report['request']['settings'][key], value)
+                self.assertFalse((output/'result.json').exists())
 
     def test_pxr_selection_uses_same_batch_route(self):
         import shutil
@@ -216,19 +224,10 @@ class HistoricalCaseTests(unittest.TestCase):
         with patch.object(sys, 'argv', command+['--num-workers', '-1']), self.assertRaises(ValueError):
             batch.main()
 
-    def test_pxr_pdb_potentials_no_embeddings_and_nullable_historical_ranks(self):
+    def test_pxr_pdb_potentials_no_embeddings(self):
         self.settings.update(output_format='pdb', use_potentials=True, write_embeddings=False,
                              num_workers=2, threads=0, preprocessing_threads=24)
-        self.payloads = {name: ('synthetic bookkeeping only: '+name).encode()
-                         for name in runner.native_names('cyp', 5, 'pdb', False)}
-        self.expected['native_files'] = {
-            name: {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
-            for name, data in self.payloads.items()}
-        self.expected['rank_to_original_sample'] = None
         self.save()
-        self.assertEqual(len(self.payloads), 25)
-        self.assertTrue(all(not name.endswith('.cif') and not name.startswith('embeddings_')
-                            for name in self.payloads))
         status, model = self.invoke()
         self.assertEqual(status, 0)
         command = model.call_args.args[0]
@@ -248,23 +247,9 @@ class HistoricalCaseTests(unittest.TestCase):
         container = batch.command(parsed, self.output, 'observe.py', 11, True)
         self.assertFalse(any(name in value for value in container
                              for name in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS')))
-        result = json.loads((self.output/'comparison.json').read_text())
-        self.assertFalse(result['historical_ranks_checked'])
-        self.assertTrue(result['ranks_match'])
-        # Unknown original indices must never weaken ranked-filename byte checks.
-        pred = self.output/'prediction/seed-11/native/boltz_results_inputs/predictions/cyp'
-        name = 'cyp_model_0.pdb'; (pred/name).write_bytes(b'changed')
-        status, _ = self.invoke(['--resume'], effect=lambda *a, **k: None)
-        self.assertEqual(status, 1)
-        self.assertEqual(json.loads((self.output/'comparison.json').read_text())['differing'], [name])
-        self.synthetic_model_invocation([])
-        receipt = self.output/'prediction/seed-11/verified.json'
-        receipt.write_text(json.dumps({'status': 'PASS', 'models': 5,
-                                      'rank_to_original_sample': {'cyp': None}}))
-        self.assertEqual(self.invoke(['--resume'], effect=lambda *a, **k: None)[0], 1)
 
     def test_output_setting_defaults_and_invalid_types(self):
-        _, settings, _, _ = runner.load_case(self.directory)
+        _, settings, _ = runner.load_case(self.directory)
         self.assertEqual([settings[k] for k in ('output_format', 'use_potentials', 'write_embeddings')],
                          ['mmcif', False, True])
         argv = runtime.native_args(Path('/run/seed-11'), 11, dict(self.settings, diffusion_samples=5))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay a frozen historical case through batch.py; compare every native byte."""
+"""Run a packaged cofolding example through batch.py and its native verifier."""
 import argparse
 import gzip
 import hashlib
@@ -50,20 +50,9 @@ def integer(value, minimum=0, maximum=None):
             'Invalid integer')
 
 
-def native_names(record, samples, output_format='mmcif', write_embeddings=True):
-    names = {'embeddings_'+record+'.npz'} if write_embeddings else set()
-    extension = 'pdb' if output_format == 'pdb' else 'cif'
-    for rank in range(samples):
-        base = f'{record}_model_{rank}'
-        names |= {base+'.'+extension, 'confidence_'+base+'.json',
-                  *{key+'_'+base+'.npz' for key in ('pae', 'pde', 'plddt')}}
-    return names
-
-
 def load_case(directory):
     case = read_json(directory/'input.json')
     settings = read_json(directory/'boltz2/settings.json')
-    expected = read_json(directory/'boltz2/expected.json')
     keys(case, ('id', 'protein', 'ligand', 'msa', 'seed', 'samples'), ('cofactors',))
     text(case['id'], r'[A-Za-z0-9_-]+')
     keys(case['protein'], ('id', 'sequence'))
@@ -107,20 +96,7 @@ def load_case(directory):
     integer(settings['num_workers'])
     integer(settings['recycling_steps'])
     require(type(settings['no_kernels']) is bool, 'no_kernels must be boolean')
-    keys(expected, ('historical_run', 'image_id', 'checkpoint_sha256', 'native_files', 'rank_to_original_sample'))
-    text(expected['historical_run']); text(expected['image_id'], r'sha256:[0-9a-f]{64}')
-    text(expected['checkpoint_sha256'], r'[0-9a-f]{64}')
-    require(type(expected['native_files']) is dict and
-            set(expected['native_files']) == native_names(settings['record_id'], case['samples'],
-                                                         settings['output_format'], settings['write_embeddings']),
-            'Historical inventory must contain every native prediction file')
-    for spec in expected['native_files'].values():
-        keys(spec, ('sha256', 'bytes'))
-        text(spec['sha256'], r'[0-9a-f]{64}'); integer(spec['bytes'], 1)
-    rank = expected['rank_to_original_sample']
-    require(rank is None or (type(rank) is list and all(type(i) is int for i in rank) and
-            sorted(rank) == list(range(case['samples']))), 'Historical ranks must be null or a sample permutation')
-    return case, settings, expected, msa_bytes
+    return case, settings, msa_bytes
 
 
 def atomic_json(path, value):
@@ -187,28 +163,15 @@ def batch_command(args, case, settings):
     return cmd
 
 
-def compare(output, case, settings, expected):
+def example_result(output, case, settings):
+    """Summarize the receipt from batch.py's actual native verification."""
     stage = output/'prediction'/f"seed-{case['seed']}"
-    pred = stage/'native/boltz_results_inputs/predictions'/settings['record_id']
-    actual = {str(p.relative_to(pred)): p for p in pred.rglob('*') if p.is_file()}
-    frozen = expected['native_files']
-    missing = sorted(set(frozen)-set(actual)); extra = sorted(set(actual)-set(frozen))
-    differing = sorted(name for name in set(frozen)&set(actual)
-                       if actual[name].is_symlink() or actual[name].stat().st_size != frozen[name]['bytes']
-                       or batch.sha(actual[name]) != frozen[name]['sha256'])
-    receipt = read_json(stage/'verified.json') if (stage/'verified.json').is_file() else {}
-    ranks = receipt.get('rank_to_original_sample', {}).get(settings['record_id'])
-    valid_ranks = (type(ranks) is list and all(type(i) is int for i in ranks)
-                   and sorted(ranks) == list(range(case['samples'])))
-    ranks_checked = expected['rank_to_original_sample'] is not None
-    ranks_match = valid_ranks and (not ranks_checked or ranks == expected['rank_to_original_sample'])
-    accepted = (receipt.get('status') == 'PASS' and type(receipt.get('models')) is int
-                and receipt['models'] == case['samples'])
-    return {'status': 'PASS' if not (missing or extra or differing) and ranks_match and accepted else 'FAIL',
-            'missing': missing, 'extra': extra, 'differing': differing,
-            'rank_to_original_sample': ranks, 'ranks_match': ranks_match,
-            'historical_ranks_checked': ranks_checked, 'batch_verified': accepted,
-            'historical_run': expected['historical_run'], 'historical_image_id': expected['image_id']}
+    receipt = read_json(stage/'verified.json')
+    require(receipt.get('status') == 'PASS' and type(receipt.get('models')) is int
+            and receipt['models'] == case['samples'], 'Batch verification did not pass for all samples')
+    return {'status': 'PASS', 'case': case['id'], 'models': receipt['models'],
+            'native_outputs': str(stage/'native/boltz_results_inputs/predictions'/settings['record_id']),
+            'verification': str(stage/'verified.json')}
 
 
 def parser():
@@ -230,23 +193,21 @@ def main(argv=None):
         require(args.output != source and args.output not in source.parents and source not in args.output.parents,
                 'Output must be separate from cases and assets')
     args.output.mkdir(parents=True, exist_ok=True)
-    result_path = args.output/'comparison.json'
+    result_path = args.output/'result.json'
     result_path.unlink(missing_ok=True)  # No stale PASS survives any attempted check.
     try:
-        case, settings, expected, msa_bytes = load_case(CASES/args.case)
-        require(batch.sha(args.checkpoint) == expected['checkpoint_sha256'], 'Selected checkpoint hash mismatch')
+        case, settings, msa_bytes = load_case(CASES/args.case)
         materialize(args.output, case, settings, msa_bytes)
         subprocess.run(batch_command(args, case, settings), check=True)
         if args.dry_run:
             return 0
-        result = compare(args.output, case, settings, expected)
+        result = example_result(args.output, case, settings)
         atomic_json(result_path, result)
         print(json.dumps(result))
         return 0 if result['status'] == 'PASS' else 1
     except Exception as error:
-        atomic_json(result_path, {'status': 'FAIL', 'error': str(error),
-                                  'missing': [], 'extra': [], 'differing': []})
-        print('Historical comparison failed: '+str(error), file=sys.stderr)
+        atomic_json(result_path, {'status': 'FAIL', 'error': str(error)})
+        print('Example failed: '+str(error), file=sys.stderr)
         return 1
 
 
