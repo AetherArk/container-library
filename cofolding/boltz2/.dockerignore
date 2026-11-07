@@ -1,3 +1,9 @@
 *
 !Dockerfile
 !requirements.lock
+!resident/
+!resident/**
+!batch_native/
+!batch_native/**
+**/__pycache__
+**/*.pyc

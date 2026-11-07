@@ -1,0 +1,4 @@
+#!/opt/venv/bin/python
+from resident.worker import main
+
+raise SystemExit(main())

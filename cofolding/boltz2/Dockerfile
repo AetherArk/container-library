@@ -24,6 +24,12 @@ RUN git init /opt/boltz \
  && python -m pip install --no-deps --no-build-isolation '/opt/boltz[cuda]' \
  && python -m pip check \
  && rm -rf /opt/boltz/.git
+# Keep the native boltz CLI; add the common persistent-worker entrypoint.
+COPY resident /opt/cofold/resident
+COPY batch_native /opt/cofold/batch_native
+RUN chmod 755 /opt/cofold/resident/cofold-run \
+ && ln -s /opt/cofold/resident/cofold-run /opt/venv/bin/cofold-run
+ENV PYTHONPATH=/opt/cofold
 RUN groupadd --gid 1000 boltz \
  && useradd --uid 1000 --gid 1000 --create-home boltz \
  && mkdir -p /workspace/cache /workspace/outputs /workspace/inputs /work \
@@ -32,7 +38,7 @@ ENV BOLTZ_CACHE=/workspace/cache TRITON_CACHE_DIR=/workspace/cache/triton \
     HF_HOME=/workspace/cache/hf XDG_CACHE_HOME=/workspace/cache
 USER boltz
 WORKDIR /work
-ENTRYPOINT ["boltz"]
+ENTRYPOINT ["cofold-run"]
 CMD ["--help"]
 LABEL org.opencontainers.image.title="Boltz2" \
       org.opencontainers.image.version="2.2.1" \
