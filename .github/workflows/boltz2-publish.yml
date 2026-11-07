@@ -1,0 +1,97 @@
+name: Publish Boltz2 candidate to GHCR
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Explicit container release tag; use a new tag for each release
+        required: true
+        default: 2.2.1-worker-v1-rc1
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: boltz2-publish-${{ inputs.image_tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_TAG: ${{ inputs.image_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Validate release tag and select package
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^2\.2\.1-worker-[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]
+          (( ${#RELEASE_TAG} <= 128 ))
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/boltz2" >> "$GITHUB_ENV"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+      - name: CPU tests
+        run: |
+          python -m pip install -r cofolding/boltz2/requirements-host.txt
+          python scripts/test_local.py --suite cpu
+      - name: Make space on the disposable hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted ]]
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          python -c 'import shutil; assert shutil.disk_usage("/").free >= 50 * 2**30, "Need 50 GiB free for image build/export"'
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build labeled release image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64 --load \
+            --build-arg CONTAINER_REVISION="$GITHUB_SHA" \
+            --build-arg CONTAINER_VERSION="$RELEASE_TAG" \
+            --tag "$IMAGE:$RELEASE_TAG" cofolding/boltz2
+      - name: Installed-image checks before publication
+        run: python scripts/test_local.py --suite image --image "$IMAGE:$RELEASE_TAG"
+      - name: Authenticate with the workflow token
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Push and resolve registry digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE:$RELEASE_TAG" | tee "$RUNNER_TEMP/boltz2-push.log"
+          python - <<'PY'
+          import os, pathlib, re
+          text = (pathlib.Path(os.environ['RUNNER_TEMP']) / 'boltz2-push.log').read_text()
+          values = re.findall(r'digest: (sha256:[0-9a-f]{64})', text)
+          assert len(values) == 1, 'Missing or ambiguous registry digest'
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write('PUBLISHED_IMAGE=' + os.environ['IMAGE'] + '@' + values[0] + '\n')
+          PY
+      - name: Pull and check the published digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$PUBLISHED_IMAGE"
+          python scripts/test_local.py --suite image --image "$PUBLISHED_IMAGE"
+          actual=$(docker image inspect "$PUBLISHED_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+          [[ "$actual" == "$GITHUB_SHA" ]]
+          printf 'Published and pulled: `%s`\n\nSource revision: `%s`\n\nCPU/image checks only; GPU evidence is documented in TESTING.md.\n\nFirst publication is private by default; configure package visibility before anonymous-pull verification.\n' "$PUBLISHED_IMAGE" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove registry credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "${DOCKER_CONFIG:-}/config.json" ]]; then
+            docker logout ghcr.io
+          fi

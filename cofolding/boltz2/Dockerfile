@@ -40,8 +40,11 @@ USER boltz
 WORKDIR /work
 ENTRYPOINT ["cofold-run"]
 CMD ["--help"]
+ARG CONTAINER_REVISION=unknown
+ARG CONTAINER_VERSION=2.2.1-worker-v1-rc1
 LABEL org.opencontainers.image.title="Boltz2" \
-      org.opencontainers.image.version="2.2.1" \
+      org.opencontainers.image.version="${CONTAINER_VERSION}" \
+      org.opencontainers.image.revision="${CONTAINER_REVISION}" \
       org.opencontainers.image.source="https://github.com/AetherArk/container-library" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.description="Boltz 2.2.1; Python 3.11; PyTorch 2.7.1/cu128; external model assets" \
