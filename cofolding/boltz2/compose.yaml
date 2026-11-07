@@ -1,6 +1,7 @@
 services:
   boltz:
     image: ${BOLTZ_IMAGE:-container-library/boltz2:2.2.1}
+    entrypoint: ["boltz"]
     build:
       context: .
     user: "${BOLTZ_UID:-1000}:${BOLTZ_GID:-1000}"
