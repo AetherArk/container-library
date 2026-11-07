@@ -38,6 +38,10 @@ class ReleasePackagingTests(unittest.TestCase):
         for value in ('CONTAINER_REVISION="$GITHUB_SHA"', 'CONTAINER_VERSION="$RELEASE_TAG"', 'docker pull "$PUBLISHED_IMAGE"'):
             self.assertIn(value, text)
         self.assertNotIn(':latest', text)
+        checks = [line.strip() for line in text.splitlines() if line.strip().startswith('python scripts/test_local.py --suite image')]
+        self.assertEqual(len(checks), 2)
+        for command in checks:
+            self.assertIn('--cpus 2 --image', command)
 
     def test_actions_are_pinned_and_shell_scripts_parse(self):
         for file in ('boltz2.yml', 'boltz2-publish.yml'):

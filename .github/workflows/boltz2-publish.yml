@@ -57,7 +57,7 @@ jobs:
             --build-arg CONTAINER_VERSION="$RELEASE_TAG" \
             --tag "$IMAGE:$RELEASE_TAG" cofolding/boltz2
       - name: Installed-image checks before publication
-        run: python scripts/test_local.py --suite image --image "$IMAGE:$RELEASE_TAG"
+        run: python scripts/test_local.py --suite image --cpus 2 --image "$IMAGE:$RELEASE_TAG"
       - name: Authenticate with the workflow token
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "$PUBLISHED_IMAGE"
-          python scripts/test_local.py --suite image --image "$PUBLISHED_IMAGE"
+          python scripts/test_local.py --suite image --cpus 2 --image "$PUBLISHED_IMAGE"
           actual=$(docker image inspect "$PUBLISHED_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
           [[ "$actual" == "$GITHUB_SHA" ]]
           printf 'Published and pulled: `%s`\n\nSource revision: `%s`\n\nCPU/image checks only; GPU evidence is documented in TESTING.md.\n\nFirst publication is private by default; configure package visibility before anonymous-pull verification.\n' "$PUBLISHED_IMAGE" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
