@@ -101,6 +101,76 @@ class VerifyTests(unittest.TestCase):
     def test_valid_artifacts_pass(self):
         self.verify()
 
+    def positions_rows(self, layout):
+        """Coordinate rows for {chain: residue_count}; L holds LIGAND_ELEMENTS atoms."""
+        rows = []
+        for chain, count in layout.items():
+            if chain == 'L':
+                rows += [[10.0 + index, 2.0, 3.0] for index in range(len(LIGAND_ELEMENTS))]
+            else:
+                rows += [[float(len(rows) + index), 0.5, 1.25]
+                         for index in range(count * len(PROTEIN_ATOMS))]
+        return rows
+
+    def write_multichain(self, second_chain_residues=RESIDUES):
+        """Two protein chains plus the ligand, with per-chain chemistry."""
+        rows = [[float(index), 0.5, 1.25] for index in range(RESIDUES * len(PROTEIN_ATOMS))]
+        rows += [[50.0 + index, 0.5, 1.25]
+                 for index in range(second_chain_residues * len(PROTEIN_ATOMS))]
+        rows += [[10.0 + index, 2.0, 3.0] for index in range(len(LIGAND_ELEMENTS))]
+        positions = np.asarray(rows, dtype=np.float32)
+        chains = {'A': [('ALA', PROTEIN_ATOMS) for _ in range(RESIDUES)],
+                  'B': [('GLY', PROTEIN_ATOMS) for _ in range(second_chain_residues)],
+                  'L': [('LIG', LIGAND_ELEMENTS)]}
+        tokens = RESIDUES + second_chain_residues + len(LIGAND_ELEMENTS)
+        (self.attempt / 'chemistry.json').write_text(json.dumps({
+            'protein_id': None,
+            'residues': RESIDUES + second_chain_residues,
+            'chains': [{'id': 'A', 'residues': RESIDUES},
+                       {'id': 'B', 'residues': second_chain_residues}],
+            'ligand': {'id': 'L', 'consumed_smiles': LIGAND_SMILES}, 'heme': None}))
+        self.prepared = {'rid': 'tiny', 'entities': ['A', 'B', 'L']}
+        write_cif(self.attempt / 'native' / 'tiny_sample_1.cif', positions, chains)
+        label = 'tiny_sample_1'
+        (self.attempt / 'native' / f'confidence_{label}.json').write_text(json.dumps({
+            'sample_index': 1, 'sample_seed': 11000, 'plddt_mean': 70.0, 'ptm': 0.5, 'iptm': 0.4,
+            'residues': RESIDUES + second_chain_residues, 'tokens': tokens,
+            'chains': ['A', 'B', 'L'], 'pae_shape': [tokens, tokens]}))
+        np.savez_compressed(self.attempt / 'native' / f'pae_{label}.npz',
+                            pae=np.zeros((tokens, tokens), dtype=np.float32))
+        np.savez_compressed(self.attempt / 'native' / f'plddt_{label}.npz',
+                            plddt=np.full(tokens, 70.0, dtype=np.float32))
+        import torch
+        torch.save(Result(positions), self.attempt / 'capture' / 'full_result_sample_1.pt')
+        (self.attempt / 'capture' / 'full_result_sample_1_inventory.json').write_text(json.dumps({
+            '/complex/atom_positions': {'shape': list(positions.shape),
+                                        'dtype': 'torch.float32', 'finite': True}}))
+
+    def test_two_protein_chains_pass(self):
+        self.write_multichain()
+        self.verify()
+
+    def test_missing_second_chain_fails(self):
+        self.write_multichain()
+        rows = self.positions_rows({'A': RESIDUES, 'L': 1})
+        write_cif(self.attempt / 'native' / 'tiny_sample_1.cif',
+                  np.asarray(rows, dtype=np.float32),
+                  {'A': [('ALA', PROTEIN_ATOMS) for _ in range(RESIDUES)],
+                   'L': [('LIG', LIGAND_ELEMENTS)]})
+        with self.assertRaisesRegex(ValueError, 'chain set'):
+            self.verify()
+
+    def test_per_chain_residue_count_fails(self):
+        # Total residue count matches, but chain B is short by two: the per-chain check must fire.
+        self.write_multichain(second_chain_residues=RESIDUES - 2)
+        data = json.loads((self.attempt / 'chemistry.json').read_text())
+        data['chains'] = [{'id': 'A', 'residues': RESIDUES - 1},
+                          {'id': 'B', 'residues': RESIDUES - 1}]
+        data['residues'] = 2 * RESIDUES - 2
+        (self.attempt / 'chemistry.json').write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'chain .* residue count'):
+            self.verify()
+
     def test_missing_ligand_chain_fails(self):
         self.write_native(chains={'A': self.chains['A']},
                           positions=self.positions[:RESIDUES * len(PROTEIN_ATOMS)])

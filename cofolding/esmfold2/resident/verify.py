@@ -48,6 +48,8 @@ def verify_job(prepared, attempt, settings):
 
     expected_chains = set(prepared['entities'])
     protein_residues = chemistry['residues']
+    chains_expected = chemistry.get('chains') or [{'id': chemistry.get('protein_id', 'A'),
+                                                   'residues': protein_residues}]
     ligand_reference = None
     if chemistry.get('ligand'):
         ligand_reference = Chem.MolFromSmiles(chemistry['ligand']['consumed_smiles'])
@@ -73,11 +75,17 @@ def verify_job(prepared, attempt, settings):
         coordinates = np.asarray([[atom[5], atom[6], atom[7]] for atom in atoms], dtype=np.float64)
         require(coordinates.size > 0 and np.isfinite(coordinates).all(), 'non-finite coordinates')
 
-        protein = [atom for atom in atoms if atom[0] == 'A']
+        protein_ids = [chain['id'] for chain in chains_expected]
+        protein = [atom for atom in atoms if atom[0] in protein_ids]
         require(len(protein) > 0, 'no protein atoms')
-        residues = {atom[1] for atom in protein}
+        residues = {(atom[0], atom[1]) for atom in protein}
         require(len(residues) == protein_residues,
                 'protein residue count ' + str(len(residues)) + ' != ' + str(protein_residues))
+        for chain in chains_expected:
+            observed = {atom[1] for atom in atoms if atom[0] == chain['id']}
+            require(len(observed) == chain['residues'],
+                    'chain ' + chain['id'] + ' residue count ' + str(len(observed))
+                    + ' != ' + str(chain['residues']))
 
         if ligand_reference is not None:
             observed = Counter(atom[4] for atom in atoms if atom[0] == 'L')

@@ -83,3 +83,20 @@ loaded and no CUDA call was made.
   input failed on a 16 GB RTX 5070 Ti at 14.5 GB, so this is the first GPU that completes it.
 - Archive 424,345,600 bytes, sha256 `5fc943ef1ae895b40146d8c3692619bd1268c7a2aa6dde8f2d5bd63423c1a63e`;
   `run.json` status `completed`, both `predictions.jsonl` entries `completed`.
+
+## Multi-chain input (RTX 5070 Ti, local image)
+
+- `examples/two-chain.yaml`: chains `A` (Trp-cage) and `B` (20-residue synthetic), ethanol ligand;
+  seed 11, one sample, default steps/loops, `fused` backend.
+- Image `container-library/esmfold2:multichain`; assets and checkpoint mounted read-only from the
+  local flat cache; non-root container user.
+- `run.json` status `completed`; the written CIF carries chains `A`, `B`, `L`; 40 protein residues
+  and 43 confidence tokens (40 residues + 3 ligand heavy atoms); PAE 43×43, pLDDT length 43.
+- Forward 5.04 s; peak allocator reserved 13.14 GiB; receipt lists 20 hashed files.
+- Verification passed the independent reader: chain set, per-chain residue counts, total residue
+  count, ligand heavy-atom and element counts, PAE/pLDDT shapes and the captured-coordinate
+  comparison against the CIF.
+- Chain ids in the written CIF equal the input ids; duplicate protein ids, and protein ids that
+  collide with ligand ids, are rejected before preparation (unit tests).
+- Not tested: chains beyond two, identical sequences on several chains, and a two-chain input on
+  the 32 GB cloud route.
