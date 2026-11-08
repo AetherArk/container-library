@@ -97,14 +97,17 @@ def native_boundary(call):
                     self.benchmark_metrics = {'allocator_peak_reset': False,
                                               'allocator_peak_scope': 'since_last_reset_not_cell_isolated'}
                 self.benchmark_metrics.update(error_kind='cuda_out_of_memory', failure_boundary=call.__name__)
-            if call.__name__ == 'predict':
+            report = getattr(self, 'failure_metrics', None)
+            if report is None:
+                pass
+            elif call.__name__ == 'predict':
                 # Also covers transfer/capture failures before hook registration.
                 prepared = args[0] if args else kwargs.get('prepared')
                 if isinstance(prepared, dict):
                     prepared['batch'] = None
-                self.failure_metrics(attempt)
+                report(attempt)
             elif oom:
-                self.failure_metrics(attempt)
+                report(attempt)
         if oom:
             raise CudaOutOfMemoryError('CUDA allocator exhausted') from None
     return wrapped

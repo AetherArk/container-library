@@ -237,11 +237,27 @@ class ESMFold2Engine:
 
     # -- model -------------------------------------------------------------------------
     @native_boundary
+    def check_checkpoint(self):
+        """Fail with a readable message when the mounted model directory is unusable."""
+        config = self.checkpoint / 'config.json'
+        if not config.exists():
+            raise ValueError('checkpoint directory has no config.json: ' + str(self.checkpoint))
+        if config.is_symlink() and not config.exists():
+            raise ValueError('checkpoint symlink is dangling inside the mount: %s -> %s'
+                             % (config, os.readlink(config)))
+        try:
+            config.read_bytes()
+        except OSError as error:
+            raise ValueError('checkpoint config.json is unreadable: %s (%s)' % (config, error))
+        if not (self.checkpoint / 'ccd.pkl').exists():
+            raise ValueError('checkpoint directory has no ccd.pkl: ' + str(self.checkpoint))
+
     def load(self):
         if self.model is not None:
             raise RuntimeError('second checkpoint load refused')
         if not torch.cuda.is_available():
             raise RuntimeError('resident native inference requires CUDA; CPU tests use FakeEngine')
+        self.check_checkpoint()
         from esm.models.esmfold2 import ESMFold2InputBuilder, EsmFold2Model
         started = time.perf_counter()
         if not self.checkpoint_files:
@@ -296,6 +312,11 @@ class ESMFold2Engine:
             model = self.model
             if model is None or self.builder is None:
                 raise RuntimeError('predict called before load')
+            # The native fold() applies LM dropout at inference when lm_dropout > 0, so a fixed
+            # seed only reproduces a structure if the process RNG is seeded as well.
+            torch.manual_seed(int(sample_seed))
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(int(sample_seed))
             before = model.register_forward_pre_hook(prehook, with_kwargs=True)
             after = model.register_forward_hook(hook)
             torch.cuda.synchronize()
@@ -356,6 +377,21 @@ class ESMFold2Engine:
     def verify(self, prepared, attempt):
         from .verify import verify_job
         verify_job(prepared, attempt, self.settings)
+
+    def failure_metrics(self, attempt):
+        """Written by the shared native boundary; keep it cheap and non-raising."""
+        try:
+            payload = {'checkpoint_load_count': self.checkpoint_load_count,
+                       'cpu_to_gpu_transfer_count': self.cpu_to_gpu_transfer_count,
+                       'benchmark_metrics': self.benchmark_metrics}
+            if torch.cuda.is_available():
+                payload['allocator'] = {'allocated': torch.cuda.memory_allocated(),
+                                        'reserved': torch.cuda.memory_reserved(),
+                                        'peak_allocated': torch.cuda.max_memory_allocated(),
+                                        'peak_reserved': torch.cuda.max_memory_reserved()}
+            atomic_json(Path(attempt) / 'benchmark_failure.json', payload)
+        except Exception:
+            pass
 
     def snapshot(self):
         if self.model is None:

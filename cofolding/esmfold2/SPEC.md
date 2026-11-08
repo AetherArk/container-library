@@ -81,7 +81,10 @@ Defaults: `--samples 1 --steps 200 --recycles 20 --backend fused --max-parallel-
 the engine's own `fold()` defaults. `protocol.json` records both the keyword arguments the worker
 sets (`num_loops`, `num_sampling_steps`, `num_diffusion_samples`, `seed`, `include_embeddings`,
 `complex_id`) and the native defaults it inherits (`noise_scale`, `lm_dropout=0.3`, and the rest).
-Determinism at a fixed seed with `lm_dropout` left at its native value has not been checked on GPU.
+The process RNG is seeded with the sample seed before every native call, because `fold()` applies
+LM dropout at inference when `lm_dropout > 0`. Measured on GPU: with a fixed seed, PAE is bitwise
+identical across runs; coordinates agree to within 0.02 Angstrom but are not bitwise identical,
+with fused kernels, the reference backend, or `CUBLAS_WORKSPACE_CONFIG=:4096:8`.
 
 Seed mapping (frozen): base seed `S` and one-based sample index `i` give
 `sample_seed = S*1000 + i - 1`, the native mapping. `S*1000 + samples - 1` must stay within
