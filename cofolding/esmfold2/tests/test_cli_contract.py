@@ -95,7 +95,7 @@ class CliTests(unittest.TestCase):
         import throughput_benchmark as tb
         items = tb.panel(ROOT / 'examples')
         self.assertEqual([item['system'] for item in items],
-                         ['cyp.yaml', 'trpcage-ethanol.yaml'])
+                         ['cyp.yaml', 'trpcage-ethanol.yaml', 'two-chain.yaml'])
         self.assertTrue(all(item['sha256'] for item in items))
 
 

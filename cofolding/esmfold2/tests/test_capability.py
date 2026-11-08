@@ -1,4 +1,4 @@
-"""Input capability mapping: shared YAML entities -> ESMFold2's single-protein contract."""
+"""Input capability mapping: shared YAML entities -> ESMFold2's protein-chain contract."""
 import unittest
 from pathlib import Path
 import sys
@@ -28,7 +28,8 @@ def ligand(smiles='CCO', id='L'):
 class CapabilityTests(unittest.TestCase):
     def test_protein_with_one_ligand(self):
         resolved = capability(system(protein(), ligand()), 'x.yaml')
-        self.assertEqual(resolved['protein']['sequence'], TRPCAGE)
+        self.assertEqual([c['id'] for c in resolved['proteins']], ['A'])
+        self.assertEqual(resolved['proteins'][0]['sequence'], TRPCAGE)
         self.assertEqual(resolved['ligand']['smiles'], 'CCO')
         self.assertIsNone(resolved['heme'])
 
@@ -42,9 +43,18 @@ class CapabilityTests(unittest.TestCase):
         self.assertIsNone(resolved['ligand'])
         self.assertEqual(resolved['heme']['id'], 'B')
 
-    def test_two_protein_chains_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'exactly one protein'):
-            capability(system(protein(), protein(id='B'), ligand()), 'zika.yaml')
+    def test_two_protein_chains_accepted(self):
+        resolved = capability(system(protein(), protein(id='B'), ligand()), 'zika.yaml')
+        self.assertEqual([c['id'] for c in resolved['proteins']], ['A', 'B'])
+
+    def test_duplicate_protein_chain_id_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'chain ids must be unique'):
+            capability(system(protein(), protein(id='A'), ligand()), 'duplicate.yaml')
+
+    def test_chain_id_colliding_with_ligand_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'unique across proteins and ligands'):
+            capability(system(protein(), ligand(id='A')), 'collision.yaml')
+
 
     def test_second_ligand_rejected(self):
         with self.assertRaisesRegex(ValueError, 'one ligand slot'):
@@ -116,7 +126,7 @@ class CapabilityTests(unittest.TestCase):
             except ValueError as error:
                 rejected[path.stem] = str(error)
         names = [name for name, _ in supported]
-        self.assertEqual(sorted(names), ['cyp', 'trpcage-ethanol'], rejected)
+        self.assertEqual(sorted(names), ['cyp', 'trpcage-ethanol', 'two-chain'], rejected)
         cyp = dict(supported)['cyp']
         self.assertIsNotNone(cyp['heme'])
         self.assertEqual(cyp['heme']['id'], 'B')

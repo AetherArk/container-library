@@ -42,14 +42,15 @@
 
 | Entity | Supported |
 |---|---|
-| Protein | one chain, canonical sequence (container scope; upstream accepts several) |
+| Protein | one or more chains, canonical sequences, unique ids |
 | Ligand | one SMILES ligand |
 | Heme | one optional ligand containing iron (chain H) |
 | MSA | `empty` only |
 | Templates, constraints, affinity, modified polymers, CCD ligands | rejected with the capability name |
 
-`examples/trpcage-ethanol.yaml` and `examples/cyp.yaml` cover the supported shapes.
-Multi-chain inputs such as the shared Zika panel are refused; use the Boltz2 image for those.
+`examples/trpcage-ethanol.yaml`, `examples/cyp.yaml` and `examples/two-chain.yaml` cover the
+supported shapes. Non-protein polymers, per-chain MSA, pocket conditioning and covalent bonds are
+outside the qualified scope.
 
 ## Options
 

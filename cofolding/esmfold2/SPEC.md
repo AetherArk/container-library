@@ -31,14 +31,16 @@ Same format as Boltz: a directory of native YAML files, one system per file, ent
 ```yaml
 version: 1
 sequences:
-- protein: {id: A, sequence: <canonical 20-letter>}   # one chain in this container's scope
+- protein: {id: A, sequence: <canonical 20-letter>}   # one or more chains, ids unique
+- protein: {id: B, sequence: <canonical 20-letter>}   # optional additional chain
 - ligand:  {id: L, smiles: <SMILES>}                   # exactly one cofold ligand
 - ligand:  {id: B, smiles: <heme SMILES>}              # optional, must canonicalize to heme
 ```
 
 Rules enforced before preparation (each rejection names the rule):
 
-1. Exactly one `protein` entity; its sequence must be non-empty canonical `ACDEFGHIKLMNPQRSTVWY`.
+1. At least one `protein` entity; every sequence must be non-empty canonical
+   `ACDEFGHIKLMNPQRSTVWY`, and protein chain ids must be unique and distinct from ligand ids.
 2. At most one non-heme `ligand`; its SMILES must parse with RDKit.
 3. At most one heme ligand; it is recognised by canonical SMILES equality with the reference
    heme in `resident/heme.py`. A second ligand that is not that heme is rejected, because the
@@ -46,15 +48,15 @@ Rules enforced before preparation (each rejection names the rule):
 4. `msa:` must be absent or `empty`. A file path is rejected: this engine runs without MSA.
    The heme slot is the ligand whose parsed molecule contains iron; the other ligand is the
    cofold ligand.
-5. `templates`, `constraints`, `properties`/affinity, `modifications`, `cyclic`, and multi-chain
-   proteins are rejected with the engine's capability name.
+5. `templates`, `constraints`, `properties`/affinity, `modifications`, `cyclic`, RNA/DNA entities
+   and pocket or covalent-bond conditioning are rejected with the engine's capability name.
 6. Referenced files are hash-bound into the job identity exactly as in Boltz.
 
 `cofolding/test-cases/` is shared with the Boltz container, so the same YAML files exercise both
-images. `trpcage-ethanol` and `cyp` are supported; `zika` is rejected because this container
-qualifies one protein chain, and the rejection is part of the test suite. The upstream input
-builder (`StructurePredictionInput`) accepts several `ProteinInput` chains, RNA/DNA chains,
-per-chain MSA, pocket conditioning and covalent bonds; none of those are qualified here.
+images. `trpcage-ethanol`, `cyp` and the two-chain example (`examples/two-chain.yaml`) are
+supported; chains keep the input ids in the written CIF. The upstream input builder
+(`StructurePredictionInput`) also accepts RNA/DNA chains, per-chain MSA, pocket conditioning and
+covalent bonds; none of those are qualified here.
 
 ## 4. Command line
 
@@ -170,7 +172,7 @@ Independent reader checks on every completed job, without trusting the engine's 
 
 | Area | Boltz | ESMFold2 | Reason |
 |---|---|---|---|
-| Protein chains | any number | one (container scope) | upstream accepts several `ProteinInput` chains; this build qualifies one |
+| Protein chains | any number | one or more, ids unique | same shape; per-chain MSA and RNA/DNA are not qualified |
 | Ligands | any number | one ligand + optional heme | engine has two ligand slots |
 | MSA | local A3M or `empty` | `empty` only | no MSA path in the qualified build |
 | Templates/constraints/affinity | rejected | rejected | not supported either |

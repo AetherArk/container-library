@@ -1,11 +1,10 @@
 """Pinned ESMFold2 3.4.1.post1 native preparation/model/writer boundary (GPU runtime).
 
 Accepts the shared native YAML entity format used by the Boltz2 container and maps it onto the
-engine's one-ligand-plus-optional-heme input in the single-protein-chain scope this container
-qualifies. The upstream input builder accepts several protein chains, RNA/DNA chains, per-chain
-MSA, pocket conditioning and covalent bonds; those are outside the qualified scope. Every
-rejection names the rule that rejected the system, so an unsupported system never becomes an
-unexplained failure.
+engine's protein-chain plus one-ligand-plus-optional-heme input. Several protein chains are
+supported; RNA/DNA chains, per-chain MSA, pocket conditioning and covalent bonds are outside the
+qualified scope. Every rejection names the rule that rejected the system, so an unsupported
+system never becomes an unexplained failure.
 """
 from dataclasses import fields, is_dataclass, replace
 from collections import Counter
@@ -98,9 +97,11 @@ def capability(data, label):
             ligands.append(entry)
         else:
             raise ValueError(label + ': unsupported entity type ' + kind)
-    if len(proteins) != 1:
-        raise ValueError(label + ': this container qualifies exactly one protein chain; the upstream '
-                                'model accepts several. Got ' + str(len(proteins)))
+    if not proteins:
+        raise ValueError(label + ': at least one protein chain is required')
+    ids = [entry['id'] for entry in proteins]
+    if len(set(ids)) != len(ids):
+        raise ValueError(label + ': protein chain ids must be unique; got ' + ', '.join(ids))
     heme, plain = [], []
     for entry in ligands:
         (heme if canonical_smiles(entry['smiles'])[1]['iron_atoms'] else plain).append(entry)
@@ -109,7 +110,10 @@ def capability(data, label):
                          + str(len(plain)) + ' ligand(s) and ' + str(len(heme)) + ' heme(s)')
     if not plain and not heme:
         raise ValueError(label + ': at least one ligand is required; apo folding is not this route')
-    return {'protein': proteins[0], 'ligand': plain[0] if plain else None,
+    taken = set(ids) | {entry['id'] for entry in ligands}
+    if len(taken) != len(ids) + len(ligands):
+        raise ValueError(label + ': chain ids must be unique across proteins and ligands')
+    return {'proteins': proteins, 'ligand': plain[0] if plain else None,
             'heme': heme[0] if heme else None}
 
 
@@ -192,9 +196,11 @@ class ESMFold2Engine:
         label = source.name
         data = yaml.safe_load(source.read_text())
         resolved = capability(data, label)
-        protein = resolved['protein']
-        chemistry = {'protein_id': protein['id'], 'residues': len(protein['sequence']),
-                     'ligand': None, 'heme': None}
+        proteins = resolved['proteins']
+        chains = [{'id': entry['id'], 'residues': len(entry['sequence'])} for entry in proteins]
+        chemistry = {'protein_id': chains[0]['id'] if len(chains) == 1 else None,
+                     'residues': sum(chain['residues'] for chain in chains),
+                     'chains': chains, 'ligand': None, 'heme': None}
         if resolved['ligand'] is not None:
             chemistry['ligand'] = dict(canonical_smiles(resolved['ligand']['smiles'])[1],
                                        id=resolved['ligand']['id'])
@@ -221,14 +227,16 @@ class ESMFold2Engine:
             'precision': 'FP32 folding weights; bf16 ESM-C loaded on CPU then moved to GPU',
             'flow': ('exact sequence + exact SMILES -> native input preparation -> frozen released '
                      'ESMFold2 and confidence heads -> unmodified native outputs'),
-            'entities': [entry['id'] for entry in (protein, resolved['ligand'], resolved['heme'])
-                         if entry is not None]})
+            'entities': ([chain['id'] for chain in chains]
+                         + [entry['id'] for entry in (resolved['ligand'], resolved['heme'])
+                            if entry is not None])})
         atomic_json(attempt / 'checkpoint-lock.json', {
             'model': str(self.checkpoint), 'revision': os.environ.get('ESMFOLD2_REVISION'),
             'files': self.checkpoint_files or directory_identity(self.checkpoint)['files']})
         from esm.models.esmfold2 import LigandInput, ProteinInput, StructurePredictionInput
-        sequences = [ProteinInput(id='A', sequence=protein['sequence'], msa=None)]
-        entities = ['A']
+        sequences = [ProteinInput(id=chain['id'], sequence=entry['sequence'], msa=None)
+                     for chain, entry in zip(chains, proteins)]
+        entities = [chain['id'] for chain in chains]
         if resolved['ligand'] is not None:
             sequences.append(LigandInput(id='L', smiles=resolved['ligand']['smiles']))
             entities.append('L')
