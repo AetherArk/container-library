@@ -100,3 +100,19 @@ loaded and no CUDA call was made.
   collide with ligand ids, are rejected before preparation (unit tests).
 - Not tested: chains beyond two, identical sequences on several chains, and a two-chain input on
   the 32 GB cloud route.
+
+## Published tag rc2 acceptance (RTX 5070 Ti, GHCR digest)
+
+- Image `ghcr.io/aetherark/esmfold2@sha256:b547f416c70be20b4dcb7dcf9728028061d507e73eb3b7100ee27158e231a421`,
+  tag `3.4.1.post1-worker-rc2`, source revision `279658f`, pulled anonymously with an empty Docker
+  credential directory.
+- Inputs `examples/trpcage-ethanol.yaml` and `examples/two-chain.yaml`, seeds 11 and 12, one sample,
+  `--network=none`, non-root container user: four jobs, all `completed` and `verified`.
+- Two-chain attempts report chains A/B (20 + 20 residues, 43 confidence tokens); single-chain attempts
+  20 residues and 23 tokens. Forward 1.46–1.73 s for the second and later cells, 4.81 s for the first;
+  peak allocator reserved 13.10–13.21 GiB.
+- Re-running the same command with `--resume` reported `checkpoint_load_count` 0 and reused the four
+  attempt directories instead of folding again.
+- Installed-image checks before push: `cofold-run --help`, `cofold-throughput --help`, pinned
+  `esm`/`torch`/`transformer-engine`/`transformers` versions, uid 1000, `WORKDIR /work`,
+  model-revision label `69869f73…`, revision label `279658f`, and fail-closed offline asset verification.
