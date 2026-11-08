@@ -1,11 +1,14 @@
 """CPU-only lifecycle unit tests. FakeEngine never loads Boltz or a GPU."""
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from resident.errors import CudaOutOfMemoryError
 from resident.worker import run, Settings, Stop
 
 
@@ -287,6 +290,114 @@ class LifecycleTests(unittest.TestCase):
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(BlockingIOError):
                 self.go(resume=True)
+        self.assertEqual(FakeEngine.loads, 0)
+
+    def test_failed_job_writes_redacted_failure_json_referenced_by_the_receipt(self):
+        (self.inputs / 'good.yaml').write_text('good')
+
+        class Leaky(FakeEngine):
+            def predict(self, prepared, attempt, seed):
+                if seed == 11:
+                    raise RuntimeError('MSA lookup failed for /inputs/good.yaml: '
+                                       'https://example.invalid/signed/x?sig=QUERYSECRET TOKEN=DO-NOT-LEAK MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTT')
+                super().predict(prepared, attempt, seed)
+        self.assertEqual(run(self.inputs, self.output, self.assets, self.ckpt, [11, 12],
+                             Settings(), engine_factory=Leaky), 1)
+        job = self.metadata()['jobs'][0]
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(job['failure'], 'failure.json')
+        attempt = self.output / job['output']
+        failure = json.loads((attempt / 'failure.json').read_text())
+        self.assertEqual(failure['schema'], 1)
+        self.assertEqual(failure['error_kind'], 'native_error')
+        self.assertEqual(failure['phase'], 'prediction')
+        self.assertEqual(failure['exception_type'], 'RuntimeError')
+        self.assertEqual(failure['attempt_path'], str(attempt))
+        # Diagnosis survives; the credentials in it do not.
+        self.assertIn('MSA lookup failed for /inputs/good.yaml', failure['message'])
+        self.assertIn('https://example.invalid/signed/x', failure['message'])
+        self.assertNotIn('QUERYSECRET', failure['message'])
+        self.assertNotIn('DO-NOT-LEAK', failure['message'])
+        # A 40-residue sequence is a diagnosis, not a secret blob.
+        self.assertIn('MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTT', failure['message'])
+        self.assertIn('Traceback (most recent call last)', failure['traceback_tail'])
+        self.assertIn('test_resident.py', failure['traceback_tail'])
+        self.assertNotIn('DO-NOT-LEAK', failure['traceback_tail'])
+        receipt = json.loads((attempt / 'receipt.json').read_text())
+        self.assertEqual(receipt['failure'], 'failure.json')
+        self.assertEqual(receipt['schema'], 1)
+
+    def test_progress_liveness_and_schema_stamps_every_json_artifact(self):
+        (self.inputs / 'good.yaml').write_text('good')
+        self.assertEqual(self.go(), 0)
+        progress = json.loads((self.output / 'progress.json').read_text())
+        self.assertEqual(progress['schema'], 1)
+        self.assertIsInstance(progress['updated_at_unix'], float)
+        self.assertEqual(progress['pid'], os.getpid())
+        self.assertEqual(progress['jobs_completed'], 2)
+        self.assertEqual(self.metadata()['schema'], 1)
+        for job in self.metadata()['jobs']:
+            receipt = json.loads((self.output / job['output'] / 'receipt.json').read_text())
+            self.assertEqual(receipt['schema'], 1)
+
+    def test_cuda_oom_double_skips_remaining_jobs_of_that_input_without_reload(self):
+        (self.inputs / 'a.yaml').write_text('good')
+        (self.inputs / 'z.yaml').write_text('good')
+
+        class Oom(FakeEngine):
+            def predict(self, prepared, attempt, seed):
+                type(self).calls.append(seed)
+                if seed == 11 and Path(prepared).name == 'a.yaml':
+                    raise CudaOutOfMemoryError('CUDA allocator exhausted')
+                (attempt / 'payload').write_text(str(seed))
+        self.assertEqual(run(self.inputs, self.output, self.assets, self.ckpt, [11, 12],
+                             Settings(), engine_factory=Oom), 1)
+        jobs = self.metadata()['jobs']
+        self.assertEqual([j['status'] for j in jobs], ['failed', 'skipped', 'completed', 'completed'])
+        self.assertEqual(jobs[0]['error_kind'], 'cuda_out_of_memory')
+        self.assertEqual(jobs[1]['error_kind'], 'cuda_out_of_memory')
+        self.assertEqual(jobs[1]['blocked_by'], jobs[0]['key'])
+        self.assertEqual(self.metadata()['checkpoint_load_count'], 1)
+        self.assertEqual(Oom.loads, 1)
+        # a.yaml seed 12 was skipped; z.yaml ran both seeds.
+        self.assertEqual(Oom.calls, [11, 11, 12])
+        failure = json.loads((self.output / jobs[0]['output'] / 'failure.json').read_text())
+        self.assertEqual(failure['error_kind'], 'cuda_out_of_memory')
+        rows = [json.loads(line) for line in (self.output / 'predictions.jsonl').read_text().splitlines()]
+        self.assertEqual([row['error_kind'] for row in rows],
+                         ['cuda_out_of_memory', 'cuda_out_of_memory', None, None])
+
+    def test_job_timeout_records_one_job_and_later_jobs_still_run(self):
+        (self.inputs / 'a.yaml').write_text('good')
+        (self.inputs / 'z.yaml').write_text('good')
+
+        class Slow(FakeEngine):
+            def predict(self, prepared, attempt, seed):
+                type(self).calls.append(seed)
+                if Path(prepared).name == 'a.yaml':
+                    time.sleep(0.6)
+                (attempt / 'payload').write_text(str(seed))
+        self.assertEqual(run(self.inputs, self.output, self.assets, self.ckpt, [11], Settings(),
+                             engine_factory=Slow, job_timeout=0.5), 1)
+        jobs = self.metadata()['jobs']
+        self.assertEqual([j['status'] for j in jobs], ['failed', 'completed'])
+        self.assertEqual(jobs[0]['error_kind'], 'timeout')
+        self.assertEqual(jobs[0]['phase'], 'prediction')
+        self.assertEqual(jobs[0]['failure'], 'failure.json')
+        failure = json.loads((self.output / jobs[0]['output'] / 'failure.json').read_text())
+        self.assertEqual(failure['error_kind'], 'timeout')
+        self.assertIn('--job-timeout', failure['message'])
+        # A job timeout is a job result, not a fatal system failure.
+        self.assertEqual(self.metadata()['status'], 'failed')
+        self.assertEqual(self.metadata()['checkpoint_load_count'], 1)
+        self.assertTrue((self.output / jobs[1]['output'] / 'payload').is_file())
+
+    def test_job_timeout_must_be_positive_and_finite(self):
+        (self.inputs / 'good.yaml').write_text('good')
+        for value in (0, -1.0, float('inf'), float('nan')):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                run(self.inputs, self.output, self.assets, self.ckpt, [11], Settings(),
+                    engine_factory=FakeEngine, job_timeout=value)
         self.assertEqual(FakeEngine.loads, 0)
 
     def test_real_sigterm_handler_writes_final_metadata(self):

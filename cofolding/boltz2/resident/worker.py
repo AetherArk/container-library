@@ -3,13 +3,16 @@ import argparse
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import signal
 import tempfile
+import time
 import uuid
 
-from .benchmark import Benchmark, load_metadata, error_label
+from .benchmark import Benchmark, SCHEMA, load_metadata, error_label, write_failure
+from .errors import is_cuda_oom, release_exception
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,24 @@ class Settings:
 @dataclass
 class Stop:
     requested: bool = False
+
+
+class JobTimeout(RuntimeError):
+    """One input x seed job exceeded --job-timeout at a checked boundary."""
+    error_kind = 'timeout'
+
+
+def job_deadline(begin, limit, boundary):
+    """Record a job timeout at a boundary the caller chose.
+
+    Guarantee: elapsed wall time is compared around the model call and at job and
+    sample boundaries, never with SIGALRM, so no signal can fire inside CUDA code.
+    A job that overruns is reported with error_kind='timeout' at the first such
+    boundary after the overrun; there is no in-kernel cancellation, so the worker
+    cannot interrupt a single stuck native call, only stop between calls.
+    """
+    if limit is not None and time.perf_counter() - begin > limit:
+        raise JobTimeout('job exceeded --job-timeout of %g seconds at %s' % (limit, boundary))
 
 
 def sha(path):
@@ -105,7 +126,13 @@ def completed(output, key, identity):
 
 
 def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
-        engine_factory=None, stop=None, benchmark_metadata=None):
+        engine_factory=None, stop=None, benchmark_metadata=None, job_timeout=None):
+    """Run every input x seed once against one resident model.
+
+    `job_timeout` bounds one input x seed job; an overrun is recorded as a failed
+    job with error_kind='timeout' at a sample/job boundary and the remaining jobs
+    still run (see job_deadline for what cannot be cancelled).
+    """
     inputs, output, assets, checkpoint = map(Path, (inputs, output, assets, checkpoint))
     if not seeds or any(type(s) is not int or s < 0 or s > 4294967295 for s in seeds):
         raise ValueError('seeds must be explicit integers in [0, 4294967295]')
@@ -113,6 +140,8 @@ def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
         raise ValueError('invalid sampling/recycling settings')
     if settings.capture not in ('full', 'none'):
         raise ValueError("capture must be 'full' or 'none'")
+    if job_timeout is not None and not (job_timeout > 0 and job_timeout != float('inf')):
+        raise ValueError('job timeout must be a positive finite number of seconds')
     sources = sorted(p for p in inputs.iterdir() if p.suffix.lower() in ('.yaml', '.yml') and p.is_file())
     if not sources:
         raise ValueError('input directory contains no native YAML inputs')
@@ -125,7 +154,7 @@ def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with Benchmark(output, load_metadata(benchmark_metadata), sample_gpu=engine_factory is None) as benchmark:
             return _run(sources, output, assets, checkpoint, seeds, settings, resume,
-                        engine_factory, stop or Stop(), benchmark)
+                        engine_factory, stop or Stop(), benchmark, job_timeout)
 
 
 def asset_identity(assets):
@@ -147,7 +176,8 @@ def asset_identity(assets):
     return {'kind': 'files', 'sha256': digest.hexdigest()}
 
 
-def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_factory, stop, benchmark):
+def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_factory, stop, benchmark,
+         job_timeout=None):
     with benchmark.stage('identity_verification'):
         checkpoint_hash = sha(checkpoint)
         assets_identity = asset_identity(assets)
@@ -171,14 +201,14 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
             jobs.append({'input': str(source), 'seed': seed, 'seed_occurrence': occurrence,
                          'job_index': len(jobs), 'status': 'pending', 'output': None,
                          'identity': identity, 'key': key, 'reused': False})
-    meta = {'requested_seeds': seeds, 'settings': asdict(settings), 'checkpoint': checkpoint_identity,
+    meta = {'schema': SCHEMA, 'requested_seeds': seeds, 'settings': asdict(settings), 'checkpoint': checkpoint_identity,
             'assets': assets_identity,
             'implementation': implementation, 'checkpoint_load_count': 0,
             'pid': os.getpid(), 'status': 'running', 'jobs': jobs}
     engine = None
     loaded = False
     active = [None]
-    counts = {'completed': 0, 'failed': 0}
+    counts = {'completed': 0, 'failed': 0, 'skipped': 0}
     emitted = set()
     def record(job):
         if job['key'] in emitted:
@@ -190,6 +220,7 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 'sample_index': sample_index, 'seed_occurrence': job['seed_occurrence'],
                 'job_index': job['job_index'], 'status': job['status'], 'reused': job['reused'],
                 'verified': job['status'] == 'completed',
+                'error_kind': job.get('error_kind'),
                 'model_was_loaded_before_cell': job.get('model_was_loaded_before_cell'),
                 'output': job['output'], 'metrics_scope': 'input_seed_batch_not_individual_sample',
                 'metrics': job.get('benchmark_metrics'),
@@ -199,19 +230,36 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
         # Keep live updates bounded; rewriting all jobs after every transition
         # would make metadata I/O quadratic for large input directories.
         current = active[0]
-        if current and current['status'] in ('completed', 'failed'):
+        if current and current['status'] in ('completed', 'failed', 'skipped'):
             record(current)
         atomic_json(output / 'progress.json', {
+            'schema': SCHEMA, 'updated_at_unix': time.time(), 'pid': os.getpid(),
             'status': meta['status'], 'jobs_total': len(jobs),
             'jobs_completed': counts['completed'], 'jobs_failed': counts['failed'],
+            'jobs_skipped': counts['skipped'],
             'checkpoint_load_count': meta['checkpoint_load_count'],
             'current': {k: current[k] for k in ('input', 'seed', 'status')} if current else None})
         if final:
             atomic_json(output / 'run.json', meta)
     save(final=True)
+
+    def block_system(job):
+        for other in jobs:
+            if other['input'] == job['input'] and other['status'] == 'pending':
+                prior = completed(output, other['key'], other['identity']) if resume else None
+                if prior is not None:
+                    other.update(status='completed', output=str(prior.relative_to(output)), reused=True)
+                    counts['completed'] += 1
+                else:
+                    other.update(status='skipped', error_kind='cuda_out_of_memory',
+                                 reason='same_input_settings_blocked_after_cuda_oom', blocked_by=job['key'])
+                    counts['skipped'] += 1
+                record(other)
     try:
         for job in jobs:
             active[0] = job
+            if job['status'] != 'pending':
+                continue
             if stop.requested:
                 break
             with benchmark.stage('resume_verification', job_key=job['key']):
@@ -223,6 +271,7 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 continue
             attempt = output / 'jobs' / job['key'] / uuid.uuid4().hex
             attempt.mkdir(parents=True)
+            began = time.perf_counter()
             job.update(output=str(attempt.relative_to(output)), status='preparing', model_was_loaded_before_cell=loaded)
             save()
             try:
@@ -238,10 +287,17 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                     prepared = engine.prepare(Path(job['input']), attempt, job['seed'])
                 if input_identity(Path(job['input'])) != job['identity']['input']:
                     raise ValueError('input or referenced assets changed during preparation')
+                job_deadline(began, job_timeout, 'preparation')
             except Exception as exc:
-                job.update(status='failed', phase='preparation', error=error_label(exc))
+                kind = ('timeout' if isinstance(exc, JobTimeout)
+                        else 'cuda_out_of_memory' if is_cuda_oom(exc) else 'native_error')
+                job.update(status='failed', phase='preparation', error=error_label(exc), error_kind=kind)
+                if kind == 'cuda_out_of_memory':
+                    block_system(job)
+                write_failure(attempt, job, exc)
+                release_exception(exc)
                 counts['failed'] += 1
-                atomic_json(attempt / 'receipt.json', job)
+                atomic_json(attempt / 'receipt.json', dict(job, schema=SCHEMA))
                 save()
                 continue
             try:
@@ -255,8 +311,17 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                     meta['model'] = engine.snapshot()
                 job.update(status='predicting', model_before=engine.snapshot())
                 save()
-                with benchmark.stage('prediction', job_key=job['key']):
-                    engine.predict(prepared, attempt, job['seed'])
+                hook = job_timeout is not None and hasattr(engine, 'sample_deadline')
+                if hook:
+                    # Portable between-sample hook; never a signal inside CUDA code.
+                    setattr(engine, 'sample_deadline', lambda: job_deadline(began, job_timeout, 'sample'))
+                try:
+                    with benchmark.stage('prediction', job_key=job['key']):
+                        engine.predict(prepared, attempt, job['seed'])
+                finally:
+                    if hook:
+                        setattr(engine, 'sample_deadline', None)
+                job_deadline(began, job_timeout, 'prediction')
                 with benchmark.stage('verification', job_key=job['key']):
                     engine.verify(prepared, attempt)
                 job['model_after'] = engine.snapshot()
@@ -264,15 +329,22 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                     raise RuntimeError('resident model identity/device/storage changed')
                 job['status'] = 'completed'
                 with benchmark.stage('receipt_verification_and_write', job_key=job['key']):
-                    atomic_json(attempt / 'receipt.json', {'status': 'completed', 'identity': job['identity'],
+                    atomic_json(attempt / 'receipt.json', {'schema': SCHEMA, 'status': 'completed',
+                                                           'identity': job['identity'],
                                                            'sha256': inventory(attempt)})
                 counts['completed'] += 1
             except Exception as exc:
-                job.update(status='failed', phase='prediction', error=error_label(exc))
+                kind = ('timeout' if isinstance(exc, JobTimeout)
+                        else 'cuda_out_of_memory' if is_cuda_oom(exc) else 'native_error')
+                job.update(status='failed', phase='prediction', error=error_label(exc), error_kind=kind)
+                if kind == 'cuda_out_of_memory':
+                    block_system(job)
+                write_failure(attempt, job, exc)
+                release_exception(exc)
                 counts['failed'] += 1
                 if loaded:
                     job['model_after'] = engine.snapshot()
-                atomic_json(attempt / 'receipt.json', job)
+                atomic_json(attempt / 'receipt.json', dict(job, schema=SCHEMA))
                 if not loaded or job.get('model_after') != meta.get('model') or not engine.healthy():
                     meta['status'] = 'fatal'
                     break
@@ -291,6 +363,7 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
         save(final=True)
         benchmark.summary.update(status=meta['status'], checkpoint_load_count=meta['checkpoint_load_count'],
                                  jobs_total=len(jobs), jobs_completed=counts['completed'], jobs_failed=counts['failed'],
+                                 jobs_skipped=counts['skipped'],
                                  requested_predictions=len(jobs) * settings.samples,
                                  verified_predictions=counts['completed'] * settings.samples,
                                  requested_seeds=seeds, settings=asdict(settings),
@@ -317,12 +390,18 @@ def main():
                              "'none' omits them and keeps structures, confidence JSON, arrays and receipts")
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
+    parser.add_argument('--job-timeout', type=float,
+                        help='wall seconds one input x seed job may take; an overrun is recorded as '
+                             "error_kind='timeout' at the next sample/job boundary and later jobs still run")
     args = parser.parse_args()
+    if args.job_timeout is not None and not (math.isfinite(args.job_timeout) and args.job_timeout > 0):
+        parser.error('--job-timeout must be a positive finite number of seconds')
     stop = Stop()
     previous = signal.signal(signal.SIGTERM, lambda *_: setattr(stop, 'requested', True))
     try:
         settings = Settings(**{key: getattr(args, key) for key in Settings.__dataclass_fields__})
-        return run(args.input, args.output, args.assets, args.checkpoint, args.seeds, settings, args.resume, stop=stop, benchmark_metadata=args.benchmark_metadata)
+        return run(args.input, args.output, args.assets, args.checkpoint, args.seeds, settings, args.resume,
+                   stop=stop, benchmark_metadata=args.benchmark_metadata, job_timeout=args.job_timeout)
     finally:
         signal.signal(signal.SIGTERM, previous)
 

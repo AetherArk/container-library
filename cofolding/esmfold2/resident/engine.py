@@ -188,6 +188,9 @@ class ESMFold2Engine:
         self.cpu_to_gpu_transfer_count = 0
         self.benchmark_metrics = None
         self.checkpoint_files = {}
+        # Optional portable job-timeout hook, set by the worker and called between
+        # samples; never a signal handler, never inside a native CUDA call.
+        self.sample_deadline = None
         torch.set_grad_enabled(False)
 
     # -- preparation -------------------------------------------------------------------
@@ -307,6 +310,9 @@ class ESMFold2Engine:
         self.benchmark_metrics = metrics
         rid = prepared['rid']
         for index, sample_seed in enumerate(prepared['sample_seeds']):
+            check = self.sample_deadline
+            if check is not None:
+                check()  # portable job-timeout point, between samples
             observed = {}
 
             def prehook(_module, args, kwargs):

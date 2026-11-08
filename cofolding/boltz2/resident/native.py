@@ -9,6 +9,7 @@ import shutil
 import time
 
 from .benchmark import timed_forward
+from .errors import native_boundary
 
 import numpy as np
 import torch
@@ -111,6 +112,7 @@ class NativeEngine:
         if not (self.assets / 'mols').is_dir():
             raise ValueError('offline assets must contain extracted mols/')
 
+    @native_boundary
     def prepare(self, source, attempt, seed):
         seed_everything(seed, workers=True)
         data = yaml.safe_load(source.read_text())
@@ -202,6 +204,7 @@ class NativeEngine:
                 'named_parameter_storage_sha256': hashlib.sha256(json.dumps(params).encode()).hexdigest(),
                 'cpu_to_gpu_transfer_count': self.cpu_to_gpu_transfer_count}
 
+    @native_boundary
     def predict(self, prepared, attempt, seed):
         assert self.model is not None
         metrics = self.benchmark_metrics = {
@@ -308,6 +311,7 @@ class NativeEngine:
             del batch
             gc.collect()
 
+    @native_boundary
     def verify(self, prepared, attempt):
         from .verify import verify_job
         verify_job(prepared, attempt, self.settings)

@@ -217,6 +217,7 @@ class BenchmarkTests(unittest.TestCase):
         namespace = {'torch': torch, 'time': types.SimpleNamespace(perf_counter=lambda: clock[0]),
                      'atomic_json': lambda *args: None, 'save_packet': packet,
                      'timed_forward': bench.timed_forward, 'seed_everything': lambda *a, **kw: None,
+                     'native_boundary': lambda call: call,
                      'BoltzWriter': Writer, 'gc': types.SimpleNamespace(collect=lambda: None)}
         exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
         engine = types.SimpleNamespace(model=Model(), load_args={}, settings=Settings())

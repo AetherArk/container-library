@@ -12,6 +12,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -24,7 +25,12 @@ def parser():
     p.add_argument('--cpus', type=float, default=8)
     p.add_argument('--memory', default='36g')
     p.add_argument('--timeout', type=float, help='Whole run seconds; default: unlimited')
+    p.add_argument('--job-timeout', type=float,
+                   help='Per input x seed job seconds, forwarded to the worker; the job is then '
+                        "recorded as failed with error_kind='timeout' and later jobs still run")
     p.add_argument('--stop-grace', type=float, default=120, help='Job-boundary drain seconds before owned-container kill')
+    p.add_argument('--benchmark-metadata',
+                   help='Optional caller-metadata JSON file inside --inputs; forwarded as /inputs/<name>')
     p.add_argument('--lock-root', help='Shared COFOLD_GPU_LOCK_ROOT / XDG user-state GPU locks')
     p.add_argument('--dry-run', action='store_true')
     for name in ('samples', 'recycles', 'steps', 'max-parallel-samples'):
@@ -74,8 +80,14 @@ def validate(a):
             raise ValueError('Output must not overlap read-only inputs/assets/checkpoint')
     if not math.isfinite(a.cpus) or a.cpus <= 0 or not re.fullmatch(r'[1-9][0-9]*[bkmgBKMG]?', a.memory):
         raise ValueError('Invalid CPU/memory limits')
-    if any(x is not None and (not math.isfinite(x) or x <= 0) for x in (a.timeout, a.stop_grace)):
-        raise ValueError('Timeout and stop grace must be positive finite seconds')
+    if any(x is not None and (not math.isfinite(x) or x <= 0) for x in (a.timeout, a.stop_grace, a.job_timeout)):
+        raise ValueError('Timeout, job timeout and stop grace must be positive finite seconds')
+    if a.benchmark_metadata is not None:
+        # The container sees only /inputs; a host path is never forwarded.
+        metadata = mount_path(a.benchmark_metadata)
+        if a.inputs not in metadata.parents or not metadata.is_file():
+            raise ValueError('--benchmark-metadata must be an existing file inside --inputs')
+        a.benchmark_metadata = metadata
     if any(not 0 <= s <= 4294967295 for s in a.seeds):
         raise ValueError('Seeds must be uint32 integers')
     for name in ('samples', 'recycles', 'steps', 'max_parallel_samples'):
@@ -103,6 +115,10 @@ def command(a, image, token):
         cmd += ['--mount', f'type=bind,src={source},dst={target}' + (',readonly' if readonly else '')]
     cmd += ['--entrypoint', 'cofold-run', image, '--input', '/inputs', '--output', '/outputs',
             '--assets', '/models', '--checkpoint', '/checkpoint', '--seeds', *map(str, a.seeds)]
+    if a.job_timeout is not None:
+        cmd += ['--job-timeout', str(a.job_timeout)]
+    if a.benchmark_metadata is not None:
+        cmd += ['--benchmark-metadata', '/inputs/' + a.benchmark_metadata.relative_to(a.inputs).as_posix()]
     for name in ('samples', 'recycles', 'steps', 'max_parallel_samples', 'no_kernels',
                  'use_potentials', 'output_format', 'capture', 'resume'):
         value = getattr(a, name)
@@ -133,7 +149,13 @@ def owned_signal(cidfile, sig):
     return False
 
 
-def run_worker(cmd, cidfile, timeout, grace):
+def run_worker(cmd, cidfile, timeout, grace, termination=None):
+    """Run the owned container; fill `termination` when the run did not end normally.
+
+    The dict is populated only for a whole-run timeout, a launcher SIGINT/SIGTERM
+    drain, or a container killed by a signal, so the caller can write termination.json
+    without ever writing it on a normal successful exit.
+    """
     interrupted = [None]
     old = {}
     def receive(sig, frame):
@@ -170,6 +192,13 @@ def run_worker(cmd, cidfile, timeout, grace):
                     break
             time.sleep(0.1)
         rc = process.wait()
+        if termination is not None:
+            if timed_out:
+                termination.update(reason='timeout', signal=None)
+            elif interrupted[0]:
+                termination.update(reason='signal', signal=signal.Signals(interrupted[0]).name)
+            elif rc == 137:
+                termination.update(reason='signal', signal='SIGKILL')
         if timed_out:
             return 124
         if interrupted[0] and rc == 0:
@@ -186,6 +215,42 @@ def run_worker(cmd, cidfile, timeout, grace):
                 process.wait()
         for sig, handler in old.items():
             signal.signal(sig, handler)
+
+
+def container_id(cidfile):
+    """The ID this invocation's Docker run wrote, or null; never a guessed ID."""
+    try:
+        cid = Path(cidfile).read_text().strip()
+    except OSError:
+        return None
+    return cid if re.fullmatch(r'[0-9a-f]{64}', cid) else None
+
+
+def last_progress(output):
+    try:
+        data = json.loads((Path(output) / 'progress.json').read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_termination(output, cidfile, reason, signal_name, exit_code):
+    """Record a launcher-killed or signalled run; never called for a normal exit."""
+    payload = {'schema': 1, 'reason': reason, 'signal': signal_name, 'exit_code': int(exit_code),
+               'container_id': container_id(cidfile), 'last_progress': last_progress(output),
+               'timestamp_unix': time.time()}
+    path = Path(output) / 'termination.json'
+    fd, name = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(payload, stream, indent=2, allow_nan=False)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def terminal_receipt(path):
@@ -224,7 +289,14 @@ def main(argv=None):
                 (runtime / name).mkdir(exist_ok=True)
             receipt = a.output / 'run.json'
             before = receipt.stat().st_mtime_ns if receipt.exists() else None
-            rc = run_worker(cmd, runtime / (token + '.cid'), a.timeout, a.stop_grace)
+            cidfile = runtime / (token + '.cid')
+            termination = {}
+            rc = run_worker(cmd, cidfile, a.timeout, a.stop_grace, termination)
+            if termination:
+                try:
+                    write_termination(a.output, cidfile, termination['reason'], termination['signal'], rc)
+                except OSError as exc:
+                    print(f'termination.json not written: {exc}', file=sys.stderr)
             try:
                 if not receipt.exists() or receipt.stat().st_mtime_ns == before:
                     raise ValueError('No current run.json written by worker')
