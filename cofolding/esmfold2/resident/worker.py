@@ -19,7 +19,7 @@ from .errors import is_cuda_oom, release_exception
 class Settings:
     samples: int = 1
     loops: int = 20
-    steps: int = 100
+    steps: int = 200
     backend: str = 'fused'
     max_parallel_samples: int = 1
     output_format: str = 'mmcif'
@@ -393,7 +393,7 @@ def main():
     parser.add_argument('--recycles', dest='loops', type=int, default=20,
                         help='ESMFold2 num_loops (same position as the Boltz recycles flag)')
     parser.add_argument('--loops', dest='loops', type=int, help='alias for --recycles')
-    parser.add_argument('--steps', type=int, default=100, help='ESMFold2 num_sampling_steps')
+    parser.add_argument('--steps', type=int, default=200, help='ESMFold2 num_sampling_steps')
     parser.add_argument('--backend', choices=('fused', 'reference'), default='fused')
     parser.add_argument('--no-kernels', action='store_true', help='alias for --backend reference')
     parser.add_argument('--max-parallel-samples', type=int, default=1)

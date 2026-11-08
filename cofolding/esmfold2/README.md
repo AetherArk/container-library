@@ -22,7 +22,7 @@
 
 ## Run
 
-- `.venv/bin/python run_cofold.py --image container-library/esmfold2:3.4.1.post1-worker-rc1 --inputs cofolding/esmfold2/examples --assets /path/to/cache --checkpoint /path/to/cache --output /path/to/new-results --gpu GPU-UUID --seeds 11 --samples 1 --steps 100 --recycles 20`
+- `.venv/bin/python run_cofold.py --image container-library/esmfold2:3.4.1.post1-worker-rc1 --inputs cofolding/esmfold2/examples --assets /path/to/cache --checkpoint /path/to/cache --output /path/to/new-results --gpu GPU-UUID --seeds 11 --samples 1 --steps 200 --recycles 20`
 - `--checkpoint` is the directory that directly contains `config.json` and `ccd.pkl`; `--assets`
   may be that same directory. Under a Hugging Face cache this is
   `huggingface/hub/models--biohub--ESMFold2/snapshots/69869f73...`. The directory is hashed once per invocation.

@@ -259,7 +259,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.metadata()['jobs'][1]['status'], 'pending')
 
     def test_defaults_and_invalid_seed_or_settings_before_load(self):
-        self.assertEqual(Settings(), Settings(1, 20, 100, 'fused', 1, 'mmcif'))
+        self.assertEqual(Settings(), Settings(1, 20, 200, 'fused', 1, 'mmcif'))
         (self.inputs / 'good.yaml').write_text('good')
         for seeds in ([], [-1], [4294967296]):
             with self.assertRaises(ValueError):

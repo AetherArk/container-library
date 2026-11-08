@@ -58,7 +58,7 @@ the rejection is part of the test suite.
 
 ```
 cofold-run --input /inputs --output /outputs --assets /models --checkpoint /models/esmfold2 \
-           --seeds 11 12 --samples 5 --steps 100 --recycles 20 --backend fused
+           --seeds 11 12 --samples 5 --steps 200 --recycles 20 --backend fused
 ```
 
 | Flag | Meaning | Boltz equivalent |
@@ -77,7 +77,11 @@ cofold-run --input /inputs --output /outputs --assets /models --checkpoint /mode
 | `--resume` | verify and reuse intact jobs | same |
 | `--metadata` | optional allowlisted host metadata for the benchmark | same |
 
-Defaults: `--samples 1 --steps 100 --recycles 20 --backend fused --max-parallel-samples 1`.
+Defaults: `--samples 1 --steps 200 --recycles 20 --backend fused --max-parallel-samples 1`, which are
+the engine's own `fold()` defaults. `protocol.json` records both the keyword arguments the worker
+sets (`num_loops`, `num_sampling_steps`, `num_diffusion_samples`, `seed`, `include_embeddings`,
+`complex_id`) and the native defaults it inherits (`noise_scale`, `lm_dropout=0.3`, and the rest).
+Determinism at a fixed seed with `lm_dropout` left at its native value has not been checked on GPU.
 
 Seed mapping (frozen): base seed `S` and one-based sample index `i` give
 `sample_seed = S*1000 + i - 1`, the native mapping. `S*1000 + samples - 1` must stay within
@@ -150,7 +154,7 @@ Independent reader checks on every completed job, without trusting the engine's 
 - `errors.py`: CUDA OOM classification across the whole engine call scope, per-system skip after
   an OOM, continue with independent systems without reloading the model.
 - `throughput_benchmark.py`: fixed-budget sweeps and five-host aggregation. Defaults follow the
-  engine: `--steps 100`, `--recycles 20`, `--levels 1`, `--samples 1`. Because this engine cannot
+  engine: `--steps 200`, `--recycles 20`, `--levels 1`, `--samples 1`. Because this engine cannot
   batch samples, only `--levels 1` is meaningful; both the sweep and the worker reject any other
   level with an explicit message, so a level ladder fails loudly instead of measuring the same
   work twice. `--use-potentials` has no equivalent and is rejected rather than forwarded.

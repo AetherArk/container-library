@@ -61,7 +61,7 @@ class SweepContractTests(unittest.TestCase):
     def test_defaults_follow_the_engine(self):
         args = parse(self.base)
         self.assertEqual(args.levels, [1])
-        self.assertEqual((args.steps, args.recycles), (100, 20))
+        self.assertEqual((args.steps, args.recycles), (200, 20))
 
     def test_parallel_level_above_one_is_refused(self):
         with self.assertRaises(SystemExit):
