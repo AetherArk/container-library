@@ -26,12 +26,13 @@ RUN python -m pip install -r /opt/requirements.lock \
 # Resident worker, throughput sweep and the offline asset fetcher.
 COPY resident /opt/cofold/resident
 COPY batch_native /opt/cofold/batch_native
-COPY fetch_assets.py assets.json throughput_benchmark.py /opt/cofold/
-COPY cofold-throughput /opt/cofold/cofold-throughput
+COPY fetch_assets.py assets.json throughput_benchmark.py cloud_job.py /opt/cofold/
+COPY cofold-throughput cofold-cloud-run /opt/cofold/
 RUN chmod 755 /opt/cofold/resident/cofold-run \
  && ln -s /opt/cofold/resident/cofold-run /opt/venv/bin/cofold-run \
- && chmod 755 /opt/cofold/cofold-throughput \
- && ln -s /opt/cofold/cofold-throughput /opt/venv/bin/cofold-throughput
+ && chmod 755 /opt/cofold/cofold-throughput /opt/cofold/cofold-cloud-run \
+ && ln -s /opt/cofold/cofold-throughput /opt/venv/bin/cofold-throughput \
+ && ln -s /opt/cofold/cofold-cloud-run /opt/venv/bin/cofold-cloud-run
 ENV PYTHONPATH=/opt/cofold
 # The Ubuntu 24.04 base already defines uid/gid 1000 as `ubuntu`; creating another
 # user with that id fails. Reuse it so mounted host files keep working at uid 1000.

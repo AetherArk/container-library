@@ -5,6 +5,8 @@
 !assets.json
 !throughput_benchmark.py
 !cofold-throughput
+!cloud_job.py
+!cofold-cloud-run
 !resident/
 !resident/**
 !batch_native/

@@ -1,0 +1,2 @@
+# Host-side launcher dependencies (never installed into the prediction image).
+PyYAML>=6,<7
