@@ -55,9 +55,12 @@ def launch(prepared, offer_id, disk, label=None, dry_run=False):
     job = json.loads((Path(prepared) / 'job.json').read_text())
     environment = spec_environment(prepared)
     label = label or ('esmfold2-cloud-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    # Entrypoint launch mode: the provider runs the image as built, without injecting ssh/jupyter
+    # into a container that has neither. cofold-cloud-run is the wrapper's installed path.
     argv = ['create', 'instance', str(offer_id), '--image', job['image'], '--disk', str(disk),
-            '--ssh', '--label', label, '--env', 'COFOLD_CLOUD_SPEC=' + environment,
-            '--onstart-cmd', 'cofold-cloud-run']
+            # Vast expects docker-style env syntax: a bare KEY=VALUE is parsed as a port mapping.
+            '--label', label, '--env', '-e COFOLD_CLOUD_SPEC=' + environment,
+            '--entrypoint', '/opt/cofold/cofold-cloud-run']
     response = vast_json(argv, dry_run=dry_run)
     if dry_run:
         return {'label': label, 'job_id': job['job_id'], 'offer_id': offer_id}

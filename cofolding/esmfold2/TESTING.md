@@ -5,7 +5,7 @@
 Run from this directory:
 
 ```sh
-/home/dan/swr/miniconda3/envs/cheminf/bin/python -m unittest discover -s tests -v
+python -m unittest discover -s tests -v  # any Python with the package deps
 ```
 
 `cheminf` is only an example interpreter: the suite needs `pyyaml`, `numpy`, `rdkit`, `gemmi`

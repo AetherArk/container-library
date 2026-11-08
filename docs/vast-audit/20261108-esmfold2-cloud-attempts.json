@@ -1,21 +1,70 @@
 {
-  "schema_version": "gpu_job_dashboard_v1",
-  "display_name": "ESMFold2 24 GB cloud acceptance (Vast.ai)",
-  "created_utc": "2026-11-08T12:30:00Z",
-  "provider": "vast.ai",
-  "attempts": [
-    {"instance_id": 59712460, "offer_id": 44527582, "machine_id": 39772, "gpu": "RTX 3090 24GB",
-     "hourly_rate_usd": 0.4007, "failure_class": "provisioning_unavailable_resources",
-     "notes": "success=false at create; start reported 'Required resources are currently unavailable'; destroyed before any setup."},
-    {"instance_id": 59712682, "offer_id": 48386182, "machine_id": 135788, "gpu": "RTX 3090 24GB",
-     "hourly_rate_usd": 0.2311, "failure_class": "provisioning_unavailable_resources",
-     "notes": "same stopped/loading pattern; destroyed."},
-    {"instance_id": 59712865, "offer_id": 18209627, "machine_id": 10121, "gpu": "RTX 3090 24GB",
-     "hourly_rate_usd": 0.3356, "failure_class": "accepted_probe_completed",
-     "acceptance_probe": {"ssh_opened": true, "nvidia_smi_verified": true, "driver": "580.126.09",
-                          "docker_cli_present": false},
-     "notes": "Accepted host. No docker inside the instance, so the packaged image cannot be built there. Destroyed after the image delivery route was identified as the blocker; no science was run."}
-  ],
-  "blocker": "The 23.9 GB container image cannot be delivered to the provider: GHCR push needs write:packages (token has gist, read:org, repo, workflow) and anonymous ttl.sh rejects the large blob upload with a commit timeout.",
-  "active_instances_after": []
+ "schema_version": "gpu_job_dashboard_v1",
+ "display_name": "ESMFold2 24 GB cloud acceptance (Vast.ai)",
+ "created_utc": "2026-11-08T12:30:00Z",
+ "provider": "vast.ai",
+ "attempts": [
+  {
+   "instance_id": 59712460,
+   "offer_id": 44527582,
+   "machine_id": 39772,
+   "gpu": "RTX 3090 24GB",
+   "hourly_rate_usd": 0.4007,
+   "failure_class": "provisioning_unavailable_resources",
+   "notes": "success=false at create; start reported 'Required resources are currently unavailable'; destroyed before any setup."
+  },
+  {
+   "instance_id": 59712682,
+   "offer_id": 48386182,
+   "machine_id": 135788,
+   "gpu": "RTX 3090 24GB",
+   "hourly_rate_usd": 0.2311,
+   "failure_class": "provisioning_unavailable_resources",
+   "notes": "same stopped/loading pattern; destroyed."
+  },
+  {
+   "instance_id": 59712865,
+   "offer_id": 18209627,
+   "machine_id": 10121,
+   "gpu": "RTX 3090 24GB",
+   "hourly_rate_usd": 0.3356,
+   "failure_class": "accepted_probe_completed",
+   "acceptance_probe": {
+    "ssh_opened": true,
+    "nvidia_smi_verified": true,
+    "driver": "580.126.09",
+    "docker_cli_present": false
+   },
+   "notes": "Accepted host. No docker inside the instance, so the packaged image cannot be built there. Destroyed after the image delivery route was identified as the blocker; no science was run."
+  },
+  {
+   "instance_id": 59716866,
+   "offer_id": 59715588,
+   "machine_id": 53867,
+   "gpu": "RTX 3090 24GB",
+   "hourly_rate_usd": 0.28,
+   "failure_class": "launch_mode_rejected",
+   "notes": "Created with --ssh; the provider injected sshd into a container that has none and never started the workload. Destroyed after the pull completed."
+  },
+  {
+   "instance_id": 59717805,
+   "offer_id": 59715588,
+   "machine_id": 53867,
+   "gpu": "RTX 3090 24GB",
+   "hourly_rate_usd": 0.28,
+   "failure_class": "env_not_delivered",
+   "notes": "Entrypoint mode. The wrapper ran but exited with 'cloud attempt failed'; /proc/1/environ contained no COFOLD_CLOUD_SPEC. Cause: --env needs docker syntax '-e KEY=VALUE'; a bare KEY=VALUE is parsed as a port mapping."
+  },
+  {
+   "instance_id": 59718146,
+   "offer_id": 59715588,
+   "machine_id": 53867,
+   "gpu": "RTX 3090 24GB",
+   "hourly_rate_usd": 0.28,
+   "failure_class": "running",
+   "notes": "Accepted launch: image pull, then the assets stage downloading the 24.9 GiB asset set."
+  }
+ ],
+ "blocker": "The 23.9 GB container image cannot be delivered to the provider: GHCR push needs write:packages (token has gist, read:org, repo, workflow) and anonymous ttl.sh rejects the large blob upload with a commit timeout.",
+ "active_instances_after": []
 }
