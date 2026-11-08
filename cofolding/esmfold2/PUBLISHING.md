@@ -3,7 +3,7 @@
 ## Prepared workflow
 
 - `.github/workflows/esmfold2-publish.yml`: manual dispatch only; no automatic publication on push/PR.
-- Target: `ghcr.io/aetherark/esmfold2:3.4.1.post1-worker-rc1`; Linux amd64. Choose a new explicit tag for every later release; never overwrite a published tag.
+- Latest release: `ghcr.io/aetherark/esmfold2:3.4.1.post1-worker-rc2`, digest `sha256:b547f416c70be20b4dcb7dcf9728028061d507e73eb3b7100ee27158e231a421`, built from commit `279658f` (multi-chain input). Earlier tag `3.4.1.post1-worker-rc1` remains published and is single-chain only. Linux amd64; choose a new explicit tag for every later release; never overwrite a published tag.
 - Order: CPU capability tests → image build → installed-image checks → push → pull by registry digest → installed-image checks and source-label verification.
 - Credentials: built-in `GITHUB_TOKEN`, job-scoped `packages: write`; no PAT/secret required.
 - Labels distinguish container-library revision/release from upstream `esm` revision and from the Hugging Face model revision (`ai.aetherark.esmfold2.model_revision`).
@@ -46,3 +46,17 @@
   tensor inventory, one resume, `--levels 1` throughput) has not been run for this tag.
 - Registry publication and anonymous-pull verification remain pending until the workflow actually
   runs and visibility is confirmed.
+
+## Release record
+
+- `3.4.1.post1-worker-rc2` — digest `sha256:b547f416c70be20b4dcb7dcf9728028061d507e73eb3b7100ee27158e231a421`, source revision `279658fd19720ff7d95f90c5541cfe0824d804f1`.
+- Workflow dispatch of `.github/workflows/esmfold2-publish.yml` (run 42499925109) built the image and passed
+  the installed-image checks, then failed at the push step with `permission_denied: write_package`. The
+  package does not grant the repository's Actions token write access, so `packages: write` in the job is
+  not sufficient. The image was then built locally from the same commit with the same build arguments
+  (`CONTAINER_REVISION`, `CONTAINER_VERSION`), pushed with an organization member token that carries
+  `write:packages`, and verified by anonymous pull.
+- To restore the workflow path: Organization → Packages → esmfold2 → Package settings → grant
+  AetherArk/container-library access with write permission, then dispatch again with a new tag.
+- Published tags are public; `DOCKER_CONFIG=<empty dir> docker pull ghcr.io/aetherark/esmfold2@<digest>`
+  and an anonymous manifest request both returned success for rc2.

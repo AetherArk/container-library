@@ -5,7 +5,7 @@ on:
       image_tag:
         description: Explicit container release tag; use a new tag for each release
         required: true
-        default: 3.4.1.post1-worker-rc1
+        default: 3.4.1.post1-worker-rc2
         type: string
 permissions:
   contents: read
