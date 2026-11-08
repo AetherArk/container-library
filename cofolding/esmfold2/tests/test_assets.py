@@ -84,6 +84,27 @@ class AssetsTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn('No directory holds all pinned files', proc.stderr)
 
+    def test_materialize_writes_real_files_from_a_cache(self):
+        cache = self.root / 'cache'
+        blobs = cache / 'huggingface' / 'hub' / 'models--example--model' / 'blobs'
+        snapshot = cache / 'huggingface' / 'hub' / 'models--example--model' / 'snapshots' / REVISION
+        blobs.mkdir(parents=True)
+        snapshot.mkdir(parents=True)
+        for name, data in PAYLOAD.items():
+            blob = blobs / hashlib.sha256(data).hexdigest()
+            blob.write_bytes(data)
+            (snapshot / name).symlink_to(Path('../../blobs') / blob.name)
+        flat = self.root / 'flat-out'
+        proc = subprocess.run([sys.executable, str(SCRIPT), '--assets', str(cache),
+                               '--manifest', str(self.manifest), '--materialize', str(flat)],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for name, data in PAYLOAD.items():
+            target = flat / name
+            self.assertTrue(target.is_file())
+            self.assertFalse(target.is_symlink())
+            self.assertEqual(target.read_bytes(), data)
+
     def test_absent_directory_fails_closed(self):
         proc, _ = self.call(self.root / 'absent')
         self.assertNotEqual(proc.returncode, 0)

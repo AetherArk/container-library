@@ -8,7 +8,9 @@
 
 ## Prerequisites
 
-- NVIDIA GPU with a CUDA-13-compatible driver, [Docker](https://docs.docker.com/engine/install/), [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+- NVIDIA GPU with a CUDA-13-compatible driver and at least 20 GB of memory for 20-residue inputs;
+  the 13.8 GB of weights plus activations exceed 16 GB for a 503-residue protein, so CYP-scale
+  systems need 24 GB or more, [Docker](https://docs.docker.com/engine/install/), [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 - Git; host Python 3.12+ with pip/venv for the launcher.
 - GPU UUID: `nvidia-smi --query-gpu=uuid,name --format=csv`.
 

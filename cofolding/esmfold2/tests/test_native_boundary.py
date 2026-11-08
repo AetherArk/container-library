@@ -10,7 +10,8 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from resident.engine import cpu, save_packet
+from resident.engine import ESMFold2Engine, cpu, save_packet
+from resident.errors import native_boundary
 
 
 @dataclass
@@ -22,6 +23,22 @@ class FixtureComplex:
 class FixtureResult:
     complex: FixtureComplex
     plddt: torch.Tensor
+
+
+class NativeBoundaryTests(unittest.TestCase):
+    def test_successful_predict_does_not_require_failure_metrics(self):
+        """The boundary reports failures only; a bare engine must still return normally."""
+        class Bare:
+            benchmark_metrics = None
+
+            @native_boundary
+            def predict(self, prepared, attempt, seed):
+                return 'completed'
+
+        self.assertEqual(Bare().predict({'rid': 'x'}, Path('/tmp'), 11), 'completed')
+
+    def test_engine_provides_the_failure_report(self):
+        self.assertTrue(callable(getattr(ESMFold2Engine, 'failure_metrics', None)))
 
 
 class NativePacketTests(unittest.TestCase):
