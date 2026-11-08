@@ -15,6 +15,8 @@
 - Model weights and asset caches stay outside the images; each method's `fetch_assets.py --download` populates a cache you mount.
 - Tags name the upstream version and worker build; no `latest` tag is published. Quote the digest when a build must be fixed.
 
+Requirements for adding a method container: [docs/container-development.md](docs/container-development.md).
+
 Cloud/provider notes that apply to every container job: [docs/cloud-provider-notes.md](docs/cloud-provider-notes.md).
 
 ## Cofolding methods: [cofolding/](cofolding/).
