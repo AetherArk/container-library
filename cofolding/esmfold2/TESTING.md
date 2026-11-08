@@ -116,3 +116,15 @@ loaded and no CUDA call was made.
 - Installed-image checks before push: `cofold-run --help`, `cofold-throughput --help`, pinned
   `esm`/`torch`/`transformer-engine`/`transformers` versions, uid 1000, `WORKDIR /work`,
   model-revision label `69869f73…`, revision label `279658f`, and fail-closed offline asset verification.
+
+## Workflow-published rc3 acceptance (RTX 5070 Ti, GHCR digest)
+
+- Image `ghcr.io/aetherark/esmfold2@sha256:3cd68646f8af34e209a1a6801f58d8a16d14fbc19771c7c2d7a8893163cb92e6`,
+  tag `3.4.1.post1-worker-rc3`, built and pushed by publish run 42504382303 from commit `279658f`,
+  pulled from the registry.
+- Inputs `examples/trpcage-ethanol.yaml` and `examples/two-chain.yaml`, seed 11, one sample,
+  `--network=none`, non-root user: both `completed` and `verified`; one checkpoint load.
+- Two-chain attempt reports chains A/B; forward 4.88 s for the first cell, peak allocator reserved
+  13.10 GiB.
+- Same source revision as the rc2 acceptance run above; rc3 is the artifact to deploy because it
+  comes from the repository workflow.
