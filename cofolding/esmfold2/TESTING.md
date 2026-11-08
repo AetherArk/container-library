@@ -11,7 +11,7 @@ Run from this directory:
 `cheminf` is only an example interpreter: the suite needs `pyyaml`, `numpy`, `rdkit`, `gemmi`
 and `torch` (CPU). The container itself has all of them.
 
-The same 68 tests pass inside an image built from this directory (entrypoint override, code
+The same 73 tests pass inside an image built from this directory (entrypoint override, code
 mounted read-only, no network):
 
 ```sh
@@ -28,8 +28,9 @@ docker run --rm --network=none --user 1000:1000 --entrypoint python \
 | `tests/test_cli_contract.py` | 10 | flag mapping (`--recycles`→loops, `--no-kernels`→reference), rejected settings, shared panel read |
 | `tests/test_verify.py` | 9 | independent verifier on synthetic artifacts: ligand loss, truncation, NaN, coordinate mismatch, PAE shape |
 | `tests/test_sweep_contract.py` | 7 | directory checkpoint hashing, engine defaults, level/`--use-potentials` rejection, worker argv |
+| `tests/test_assets.py` | 5 | flat and Hugging Face cache layouts, corrupted blob behind a symlink, absent directory |
 
-Status: 68 tests pass on CPU. `FakeEngine` stands in for the model; no ESMFold2 weights were
+Status: 73 tests pass on CPU. `FakeEngine` stands in for the model; no ESMFold2 weights were
 loaded and no CUDA call was made.
 
 ## Not yet verified
