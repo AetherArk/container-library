@@ -12,6 +12,11 @@
 - Model weights are **not** in the image. `fetch_assets.py` pulls `biohub/ESMFold2` at revision
   `69869f737beffec5294845ede23db5fc0b4f509e` (11 files, ~24.9 GiB) into the mounted asset
   directory and verifies every file against `assets.json`.
+- `--assets` may be a flat directory of verified files, or an existing Hugging Face cache root.
+  In the cache case the tool locates `models--biohub--ESMFold2/snapshots/<revision>`, follows the
+  snapshot symlinks and hashes the blob bytes; the recorded checksum is still the acceptance rule.
+  `--checkpoint` must always be the directory that directly contains `config.json` and `ccd.pkl`,
+  which under a cache is that snapshot directory.
 
 ## GitHub setup
 
@@ -32,10 +37,11 @@
   `DOCKER_CONFIG=$(mktemp -d) docker pull ghcr.io/aetherark/esmfold2@sha256:...`
 - Published use: `docker pull IMAGE@DIGEST`; pass that exact reference as the cofolding image.
   Mount the verified asset directory and pass `--assets` and `--checkpoint` explicitly
-  (`--assets /models --checkpoint /models/esmfold2`).
+  (`--assets /models --checkpoint /models/esmfold2`), where `/models/esmfold2` is the directory
+  holding `config.json` and `ccd.pkl`.
 - Offline asset preparation for a host cache:
   `python cofolding/esmfold2/fetch_assets.py --assets /models --download`, then re-verify with
-  `--offline`. Both modes refuse symlinked or size/checksum-mismatched files.
+  `--offline`. Both modes reject size or checksum mismatches and report the path that failed.
 - GPU acceptance (one CYP cell and one Trp-cage cell, finite coordinates, ligand retention,
   tensor inventory, one resume, `--levels 1` throughput) has not been run for this tag.
 - Registry publication and anonymous-pull verification remain pending until the workflow actually
