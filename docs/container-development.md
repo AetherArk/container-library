@@ -235,3 +235,18 @@ Not settled by the current work; decide each one explicitly for a new method.
   `predictions.jsonl`. Whether new methods should converge on the ESMFold2 superset is undecided.
 - GPU acceptance hardware is chosen by measured fit. The CYP3A4 + heme case exhausted a 16 GB card
   and completed on a 32 GB card; that is evidence, not a minimum requirement.
+
+## 17. Planned methods
+
+Methods to be published as public containers under this repository, in no fixed order. None are
+started; each follows this document.
+
+- OpenFold3 — OpenBind weights and checkpoint.
+- OpenFold3 — original checkpoint. The two weight sets are listed separately; whether one
+  container serves both by checkpoint selection or they become separate images is an open
+  question to settle during the first OpenFold3 port.
+- IntelliFold.
+- Protenix v2.
+- OpenDDE.
+- Chai-1.
+- RosettaFold3.
