@@ -67,3 +67,7 @@
   repository, so the package is missing from the repository's package list.
 - Published tags are public; `DOCKER_CONFIG=<empty dir> docker pull ghcr.io/aetherark/esmfold2@<digest>`
   and an anonymous manifest request both returned success for rc2.
+- `3.4.1.post1-worker-rc4` — digest
+  `sha256:1ef048b21711965e72a729d5d39647db3de57911c05a94d0b3b7d13a10b82be3`, published by run
+  42530589045 from the observability-contract merge. Adds `failure.json`, `progress.json` liveness
+  fields, `schema` on every JSON artifact and `--job-timeout`. Current recommended tag.

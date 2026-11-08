@@ -25,3 +25,12 @@
 - Authenticated pull/image checks run automatically. After public visibility is set, separately verify anonymous pull with an empty Docker credential directory and rerun `scripts/test_local.py --suite image --image IMAGE@DIGEST`.
 - Published use: `docker pull IMAGE@DIGEST`; pass that exact reference to `run_cofold.py --image`.
 - Registry publication and anonymous-pull verification remain pending until the workflow actually runs and visibility is confirmed.
+
+## Release record
+
+- `2.2.1-worker-v4-observability-rc1` — digest
+  `sha256:9c1c72bbc8f5b7ac7278523ee45c50c351a275579df3158217837a2d34c29320`, published by workflow
+  run 42530578387 from the observability-contract merge: `failure.json`, `progress.json` liveness
+  fields, `schema` on every JSON artifact, CUDA OOM classification, launcher `--benchmark-metadata`,
+  `--job-timeout` and `termination.json`. Current recommended tag.
+- `2.2.1-worker-v3-benchmark-rc1` — previous tag, superseded.
