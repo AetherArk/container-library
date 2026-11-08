@@ -11,6 +11,16 @@ Run from this directory:
 `cheminf` is only an example interpreter: the suite needs `pyyaml`, `numpy`, `rdkit`, `gemmi`
 and `torch` (CPU). The container itself has all of them.
 
+The same 57 tests pass inside an image built from this directory (entrypoint override, code
+mounted read-only, no network):
+
+```sh
+docker run --rm --network=none --user 1000:1000 --entrypoint python \
+  --tmpfs /tmp:rw,exec,mode=1777,size=2g --env TMPDIR=/tmp --env HOME=/tmp \
+  --mount type=bind,src="$PWD",dst=/pkg,readonly --workdir /pkg \
+  container-library/esmfold2:3.4.1.post1-worker-rc1 -m unittest discover -s /pkg/tests
+```
+
 | File | Tests | What is exercised |
 |---|---|---|
 | `tests/test_capability.py` | 17 | YAML entity mapping, heme detection, every rejection rule, packaged examples |
