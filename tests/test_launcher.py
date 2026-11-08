@@ -42,7 +42,8 @@ class LauncherUnitTests(unittest.TestCase):
 
     def test_one_launch_all_files_and_seeds_literal_options(self):
         options = ['--samples', '1', '--recycles', '3', '--steps', '200', '--max-parallel-samples', '1',
-                   '--no-kernels', '--use-potentials', '--output-format', 'mmcif', '--resume']
+                   '--no-kernels', '--use-potentials', '--output-format', 'mmcif', '--capture', 'none',
+                   '--resume']
         commands = []
         def popen(cmd):
             commands.append(cmd)

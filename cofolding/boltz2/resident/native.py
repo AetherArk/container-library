@@ -62,9 +62,9 @@ def cpu(value):
     return value
 
 
-def save_packet(directory, label, value):
+def cpu_packet(value):
+    """Detached CPU copy plus the tensor inventory, without touching disk."""
     obj = cpu(value)
-    torch.save(obj, directory / (label + '.pt'))
     items = {}
     def walk(v, path=''):
         if torch.is_tensor(v):
@@ -77,8 +77,24 @@ def save_packet(directory, label, value):
             for i, child in enumerate(v):
                 walk(child, path + '/' + str(i))
     walk(obj)
+    return obj, items
+
+
+def save_packet(directory, label, value):
+    obj, items = cpu_packet(value)
+    torch.save(obj, directory / (label + '.pt'))
     atomic_json(directory / (label + '_inventory.json'), items)
     return obj
+
+
+def save_summary(directory, saved):
+    """Small numeric summary of a prediction, used by verification when capture is off."""
+    # Same scalar set the verifier compares, plus the arrays written next to the structures.
+    keep = ('coords', 'masks', 'pae', 'pde', 'plddt', 'pair_chains_iptm', 's', 'z',
+            'confidence_score', 'ptm', 'iptm', 'ligand_iptm', 'protein_iptm',
+            'complex_plddt', 'complex_iplddt', 'complex_pde', 'complex_ipde')
+    fields = {key: saved[key] for key in keep if key in saved}
+    torch.save(fields, directory / 'prediction_summary.pt')
 
 
 class NativeEngine:
@@ -211,8 +227,9 @@ class NativeEngine:
             'allocated': torch.cuda.memory_allocated(), 'reserved': torch.cuda.memory_reserved()}
         torch.cuda.reset_peak_memory_stats()
         metrics['allocator_peak_reset'] = True
-        capture = attempt / 'capture'
-        capture.mkdir()
+        capture = attempt / 'capture' if self.settings.capture == 'full' else None
+        if capture is not None:
+            capture.mkdir()
         begin = time.perf_counter()
         atomic_json(attempt / 'resolved_model_args.json', self.load_args)
         # Full per-parameter device/pointer evidence once per job; compact hashes
@@ -227,7 +244,8 @@ class NativeEngine:
         torch.cuda.synchronize()
         metrics['batch_transfer_seconds'] = time.perf_counter() - begin
         begin = time.perf_counter()
-        save_packet(capture, 'consumed_batch', batch)
+        if capture is not None:
+            save_packet(capture, 'consumed_batch', batch)
         metrics['output_write_seconds'] += time.perf_counter() - begin
         def capture_forward(module, args, result):
             begin = time.perf_counter()
@@ -238,7 +256,7 @@ class NativeEngine:
         original_forward = self.model.forward
         had_forward_override = 'forward' in self.model.__dict__
         self.model.forward = timed_forward(original_forward, torch.cuda.synchronize, metrics)
-        hook = self.model.register_forward_hook(capture_forward)
+        hook = self.model.register_forward_hook(capture_forward) if capture is not None else None
         seed_everything(seed, workers=True)
         try:
             torch.cuda.synchronize()
@@ -253,7 +271,11 @@ class NativeEngine:
                 if metrics['forward_seconds']:
                     metrics['forward_null_reason'] = None
             begin = time.perf_counter()
-            saved = save_packet(capture, 'full_prediction', prediction)
+            if capture is not None:
+                saved = save_packet(capture, 'full_prediction', prediction)
+            else:
+                saved, _ = cpu_packet(prediction)
+                save_summary(attempt, saved)
             metrics['output_write_seconds'] += time.perf_counter() - begin
             if saved['exception']:
                 raise RuntimeError('native predict_step reported a recoverable prediction exception')
@@ -267,7 +289,8 @@ class NativeEngine:
             finally:
                 metrics['output_write_seconds'] += time.perf_counter() - begin
         finally:
-            hook.remove()
+            if hook is not None:
+                hook.remove()
             if had_forward_override:
                 self.model.forward = original_forward
             else:

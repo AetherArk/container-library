@@ -16,14 +16,25 @@ from boltz.data.types import StructureV2
 
 def verify_job(prepared, attempt, settings):
     rid = prepared['rid']
-    b, f, p = [packet(attempt / 'capture' / (label + '.pt'))
-               for label in ('consumed_batch', 'full_forward', 'full_prediction')]
-    require(p['exception'] is False and p['coords'].shape[0] == settings.samples, 'samples/native exception')
-    require({'pdistogram', 's', 'z', 'pde_logits', 'pae_logits', 'plddt_logits', 'resolved_logits'} <= set(f), 'full forward fields')
+    capture = getattr(settings, 'capture', 'full')
+    if capture == 'none':
+        # Structures, confidence arrays and inventories are still checked; the consumed batch and
+        # the raw forward outputs do not exist in this mode, so those cross-checks cannot run.
+        require(not (attempt / 'capture').exists(), 'capture directory written with capture=none')
+        p = torch.load(attempt / 'prediction_summary.pt', map_location='cpu', weights_only=False)
+        p['exception'] = False
+        b = f = None
+        require(p['coords'].shape[0] == settings.samples, 'samples/native exception')
+    else:
+        b, f, p = [packet(attempt / 'capture' / (label + '.pt'))
+                   for label in ('consumed_batch', 'full_forward', 'full_prediction')]
+        require(p['exception'] is False and p['coords'].shape[0] == settings.samples, 'samples/native exception')
+        require({'pdistogram', 's', 'z', 'pde_logits', 'pae_logits', 'plddt_logits', 'resolved_logits'} <= set(f), 'full forward fields')
+        eq(p['coords'], f['sample_atom_coords'], 'forward coords')
+        eq(p['masks'], b['atom_pad_mask'], 'atom mask')
+        require([r.id for r in b['record']] == [rid], 'consumed record identity')
     require({'pae', 'pde', 'plddt', 'ptm', 'iptm', 'pair_chains_iptm', 's', 'z'} <= set(p), 'full prediction fields')
-    eq(p['coords'], f['sample_atom_coords'], 'forward coords')
-    eq(p['masks'], b['atom_pad_mask'], 'atom mask')
-    require([r.id for r in b['record']] == [rid], 'consumed record identity')
+    masks = p['masks']
     data = prepared['data']
     # Reuse full source chemistry/MSA checks for the established narrow route.
     # Other native structure YAMLs still receive tensor, atom and writer checks.
@@ -37,13 +48,13 @@ def verify_job(prepared, attempt, settings):
                    and not entry.get('modifications') and not entry.get('cyclic')
                    and (kind != 'ligand' or 'smiles' in entry))
     simple &= proteins == 1
-    if simple:
+    if simple and b is not None:
         structure, elements = check_input(data, prepared['processed'], rid, b)
     else:
         structure = StructureV2.load(prepared['processed'] / 'structures' / (rid + '.npz'))
         structure = structure.remove_invalid_chains()
         elements = {}
-        require(int(b['atom_pad_mask'].sum()) == len(structure.atoms), 'full atom coverage')
+        require(int(np.asarray(masks).sum()) == len(structure.atoms), 'full atom coverage')
     rank = torch.argsort(p['confidence_score'], descending=True).tolist()
     require(sorted(rank) == list(range(settings.samples)), 'rank bijection')
     pred = prepared['native'] / 'predictions' / rid
@@ -54,7 +65,7 @@ def verify_job(prepared, attempt, settings):
         expected |= {base + '.' + extension, 'confidence_' + base + '.json',
                      *{key + '_' + base + '.npz' for key in ('pae', 'pde', 'plddt')}}
         check_cif(pred / (base + '.' + extension), structure,
-                  p['coords'][i][p['masks'][0].bool()].numpy(), elements)
+                  p['coords'][i][masks[0].bool()].numpy(), elements)
         confidence = json.loads((pred / ('confidence_' + base + '.json')).read_text())
         for field in SCALARS:
             eq(confidence[field], p[field][i].numpy(), 'confidence ' + field)

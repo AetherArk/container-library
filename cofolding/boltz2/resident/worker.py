@@ -21,6 +21,7 @@ class Settings:
     no_kernels: bool = False
     use_potentials: bool = False
     output_format: str = 'mmcif'
+    capture: str = 'full'
 
 
 @dataclass
@@ -110,6 +111,8 @@ def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
         raise ValueError('seeds must be explicit integers in [0, 4294967295]')
     if any(x < 1 for x in (settings.samples, settings.steps, settings.max_parallel_samples)) or settings.recycles < 0:
         raise ValueError('invalid sampling/recycling settings')
+    if settings.capture not in ('full', 'none'):
+        raise ValueError("capture must be 'full' or 'none'")
     sources = sorted(p for p in inputs.iterdir() if p.suffix.lower() in ('.yaml', '.yml') and p.is_file())
     if not sources:
         raise ValueError('input directory contains no native YAML inputs')
@@ -309,6 +312,9 @@ def main():
     parser.add_argument('--no-kernels', action='store_true')
     parser.add_argument('--use-potentials', action='store_true')
     parser.add_argument('--output-format', choices=('mmcif', 'pdb'), default='mmcif')
+    parser.add_argument('--capture', choices=('full', 'none'), default='full',
+                        help="'full' writes the capture/ tensors and inventories (default); "
+                             "'none' omits them and keeps structures, confidence JSON, arrays and receipts")
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
     args = parser.parse_args()

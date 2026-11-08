@@ -318,3 +318,47 @@ raise SystemExit(main())
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CaptureContract(unittest.TestCase):
+    """The capture opt-out must be reachable from the CLI and must not change the default."""
+
+    def test_settings_default_and_validation(self):
+        self.assertEqual(Settings().capture, 'full')
+        self.assertEqual(Settings(capture='none').capture, 'none')
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(tmp))
+        (tmp / 'in').mkdir(); (tmp / 'in' / 'a.yaml').write_text('version: 1\n')
+        (tmp / 'assets').mkdir(); (tmp / 'ckpt').write_bytes(b'x')
+        with self.assertRaises(ValueError):
+            run(tmp / 'in', tmp / 'out', tmp / 'assets', tmp / 'ckpt', [1],
+                Settings(capture='all'), engine_factory=FakeEngine)
+
+    def test_cli_exposes_the_flag_and_maps_it_to_settings(self):
+        import argparse
+        from resident import worker
+        source = Path(worker.__file__).read_text()
+        self.assertIn("'--capture', choices=('full', 'none'), default='full'", source)
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--capture', choices=('full', 'none'), default='full')
+        self.assertEqual(parser.parse_args([]).capture, 'full')
+        self.assertEqual(parser.parse_args(['--capture', 'none']).capture, 'none')
+
+    def test_summary_packet_survives_without_capture_directory(self):
+        import shutil, tempfile as tf, torch
+        try:
+            from resident.native import save_summary
+        except ModuleNotFoundError as error:  # boltz is installed only inside the image
+            self.skipTest(str(error))
+        attempt = Path(tf.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(attempt))
+        coords = torch.zeros((1, 4, 3))
+        save_summary(attempt, {'coords': coords, 'masks': torch.ones((1, 4), dtype=torch.bool),
+                               'confidence_score': torch.tensor([0.5]), 'pae': torch.zeros((1, 4, 4)),
+                               'pde': torch.zeros((1, 4, 4)), 'plddt': torch.zeros((1, 4)),
+                               'ptm': torch.tensor(0.1), 'iptm': torch.tensor(0.2),
+                               'pair_chains_iptm': {0: {0: torch.tensor(0.3)}},
+                               's': torch.zeros((4, 2)), 'z': torch.zeros((4, 4, 2))})
+        loaded = torch.load(attempt / 'prediction_summary.pt', map_location='cpu', weights_only=False)
+        self.assertEqual(sorted(loaded), sorted(['coords', 'masks', 'confidence_score', 'pae', 'pde',
+                                                 'plddt', 'ptm', 'iptm', 'pair_chains_iptm', 's', 'z']))
+        self.assertFalse((attempt / 'capture').exists())
