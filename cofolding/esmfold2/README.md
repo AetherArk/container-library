@@ -8,9 +8,9 @@
 
 ## Container image
 
-    docker pull ghcr.io/aetherark/esmfold2:3.4.1.post1-worker-rc2
+    docker pull ghcr.io/aetherark/esmfold2:3.4.1.post1-worker-rc3
 
-- Public package; recorded digest `sha256:b547f416c70be20b4dcb7dcf9728028061d507e73eb3b7100ee27158e231a421`. Multi-chain input is included in this tag.
+- Public package; recorded digest `sha256:3cd68646f8af34e209a1a6801f58d8a16d14fbc19771c7c2d7a8893163cb92e6`. Multi-chain input is included in this tag.
 - Model weights and the ~24.9 GiB asset cache are not in the image. `fetch_assets.py --download` populates them; the cloud path stages the same cache for you.
 - Building locally is still supported (Setup below).
 

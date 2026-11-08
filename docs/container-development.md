@@ -168,6 +168,18 @@ Verification is an independent reader over the written files, not a trust statem
 
 ## 12. Publication
 
+- Every image is built and pushed by the repository's publish workflow (`.github/workflows/<method>-publish.yml`)
+  on a GitHub-hosted runner. No package is built or pushed from a developer machine, including as a
+  workaround when a workflow step fails.
+- A local `docker push` bypasses the workflow's CPU tests and installed-image checks, and GHCR does
+  not link a package to the repository for pushes that do not come from that repository's workflow,
+  so the package stays out of the repository's package list.
+- When the workflow fails at the push step with `permission_denied: write_package`, fix the package's
+  Actions access (Organization → Packages → `<package>` → Package settings → Manage Actions access,
+  add the repository with Write) or grant the repository connection, then re-dispatch. Do not fall
+  back to pushing from a machine.
+- Confirm the package is connected to the repository after the first successful workflow publish:
+  the repository's Packages section lists it.
 - Manual workflow dispatch only; never publish on push or PR.
 - One explicit tag per release, named for upstream version and worker build. Never overwrite a
   published tag; no `latest`.
@@ -202,7 +214,8 @@ Verification is an independent reader over the written files, not a trust statem
 - [ ] One checkpoint load per invocation, observed on real runs.
 - [ ] CPU suite and installed-image checks pass; GPU acceptance recorded in `TESTING.md`.
 - [ ] `SPEC.md`, `README.md`, `TESTING.md`, `PUBLISHING.md` written; root README table updated.
-- [ ] Image audited and published with an explicit tag; digest recorded.
+- [ ] Image audited and published by the repository workflow with an explicit tag; digest recorded.
+- [ ] Package connected to the repository and listed under the repository's packages.
 
 ## 16. Open questions
 
