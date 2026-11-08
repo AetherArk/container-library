@@ -14,6 +14,7 @@ import shutil
 import time
 
 from .errors import native_boundary
+import inspect
 
 import numpy as np
 import torch
@@ -23,6 +24,22 @@ from .identity import directory_identity
 from .worker import atomic_json
 
 CANONICAL = set('ACDEFGHIKLMNPQRSTVWY')
+
+#: keyword arguments the worker always passes explicitly to ``builder.fold``
+FOLD_OVERRIDES = ('num_loops', 'num_sampling_steps', 'num_diffusion_samples', 'seed',
+                  'include_embeddings', 'complex_id')
+
+
+def fold_record(fn):
+    """Effective per-call arguments: what we override, and the native defaults we inherit."""
+    parameters = inspect.signature(fn).parameters
+    defaults = {}
+    for name, parameter in parameters.items():
+        if name in ('self', 'model', 'input'):
+            continue
+        defaults[name] = None if parameter.default is inspect.Parameter.empty else parameter.default
+    return {'explicit': list(FOLD_OVERRIDES),
+            'native_defaults': {k: v for k, v in defaults.items() if k not in FOLD_OVERRIDES}}
 VERSION_PACKAGES = ('esm', 'torch', 'transformers', 'triton', 'transformer-engine',
                     'transformer-engine-torch', 'cuequivariance-torch',
                     'cuequivariance-ops-torch-cu13', 'gemmi', 'rdkit')
@@ -196,6 +213,7 @@ class ESMFold2Engine:
             'base_seed': seed, 'sample_seeds': sample_seeds,
             'seed_formula': 'base_seed*1000 + zero_based_sample_index',
             'num_diffusion_samples_per_call': 1, 'msa': False, 'templates': False,
+            'fold_call': getattr(self, 'fold_call', None),
             'precision': 'FP32 folding weights; bf16 ESM-C loaded on CPU then moved to GPU',
             'flow': ('exact sequence + exact SMILES -> native input preparation -> frozen released '
                      'ESMFold2 and confidence heads -> unmodified native outputs'),
@@ -234,6 +252,7 @@ class ESMFold2Engine:
         model.set_kernel_backend(None if self.settings.backend == 'reference' else self.settings.backend)
         self.model = model
         self.builder = ESMFold2InputBuilder(ccd_cache=self.checkpoint)
+        self.fold_call = fold_record(ESMFold2InputBuilder.fold)
         self.checkpoint_load_count += 1
         self.cpu_to_gpu_transfer_count += 1
         torch.cuda.synchronize()

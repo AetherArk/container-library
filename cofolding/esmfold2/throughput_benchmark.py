@@ -526,7 +526,7 @@ def main(argv=None):
     run.add_argument('--seeds', nargs='+', type=int, required=True)
     run.add_argument('--levels', nargs='+', type=int, default=[1])
     run.add_argument('--samples', type=int)
-    run.add_argument('--steps', type=int, default=100)
+    run.add_argument('--steps', type=int, default=200)
     run.add_argument('--recycles', type=int, default=20)
     run.add_argument('--no-kernels', action='store_true')
     run.add_argument('--use-potentials', action='store_true')

@@ -46,7 +46,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(seeds, [11])
         self.assertEqual((settings.samples, settings.loops, settings.steps, settings.backend,
                           settings.max_parallel_samples, settings.output_format),
-                         (1, 20, 100, 'fused', 1, 'mmcif'))
+                         (1, 20, 200, 'fused', 1, 'mmcif'))
 
     def test_recycles_means_num_loops(self):
         _, _, settings = parse(BASE + ['--recycles', '5'])
