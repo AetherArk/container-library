@@ -2,9 +2,17 @@
 
 - Boltz 2.2.1 (`cb04aec`); Python 3.11; PyTorch 2.7.1/cu128; Linux x86-64.
 - Persistent worker: one checkpoint load across every input × external seed in one invocation.
-- Container release candidate: `2.2.1-worker-v3-benchmark-rc1`; not published yet.
+- Container release candidate: `2.2.1-worker-v3-benchmark-rc1` (published, public).
 
 - Benchmark observations and optional presigned progress snapshots: [contract and timer scopes](resident/BENCHMARK.md).
+
+## Container image
+
+    docker pull ghcr.io/aetherark/boltz2:2.2.1-worker-v3-benchmark-rc1
+
+- Public package; recorded digest `sha256:b2625dfa1e73766cbae90270bcdc4a9f6af5ff9278acf8ad2c99b7a261cdcac8`.
+- Weights are not in the image. `fetch_assets.py --download` writes them to a cache you mount read-only.
+- Building locally is still supported (Setup below).
 
 ## Prerequisites
 

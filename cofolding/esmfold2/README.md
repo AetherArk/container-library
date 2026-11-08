@@ -4,7 +4,15 @@
 - Model: `biohub/ESMFold2`, revision `69869f737beffec5294845ede23db5fc0b4f509e`; weights stay outside the image.
 - Persistent worker: one checkpoint load across every input × external seed in one invocation.
 - Inputs and outputs use the same native YAML format and job/receipt layout as the [Boltz2 container](../boltz2/). [Interface specification](SPEC.md).
-- Container release candidate: `3.4.1.post1-worker-rc1`; not published yet.
+- Container release candidate: `3.4.1.post1-worker-rc1` (published, public).
+
+## Container image
+
+    docker pull ghcr.io/aetherark/esmfold2:3.4.1.post1-worker-rc1
+
+- Public package; recorded digest `sha256:6776870886482fb2b53dadc55005799c0c518cbbde026d10a30d7fcb7954fb6d`.
+- Model weights and the ~24.9 GiB asset cache are not in the image. `fetch_assets.py --download` populates them; the cloud path stages the same cache for you.
+- Building locally is still supported (Setup below).
 
 ## Prerequisites
 
