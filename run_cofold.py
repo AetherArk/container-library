@@ -32,6 +32,8 @@ def parser():
     for name in ('no-kernels', 'use-potentials', 'resume'):
         p.add_argument('--' + name, action='store_true')
     p.add_argument('--output-format', choices=('mmcif', 'pdb'))
+    p.add_argument('--capture', choices=('full', 'none'),
+                   help="'none' omits the per-job capture/ tensors; forward this to cofold-run")
     return p
 
 
@@ -100,7 +102,7 @@ def command(a, image, token):
     cmd += ['--entrypoint', 'cofold-run', image, '--input', '/inputs', '--output', '/outputs',
             '--assets', '/models', '--checkpoint', '/checkpoint', '--seeds', *map(str, a.seeds)]
     for name in ('samples', 'recycles', 'steps', 'max_parallel_samples', 'no_kernels',
-                 'use_potentials', 'output_format', 'resume'):
+                 'use_potentials', 'output_format', 'capture', 'resume'):
         value = getattr(a, name)
         if value is not None and value is not False:
             cmd.append('--' + name.replace('_', '-'))
