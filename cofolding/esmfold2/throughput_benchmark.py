@@ -14,8 +14,12 @@ from pathlib import Path
 import shutil
 import statistics
 import subprocess
+import sys
 import time
 import uuid
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from resident.identity import directory_identity  # noqa: E402  (stdlib only, no torch)
 
 
 SCHEMA = 'cofold-throughput-v1'
@@ -27,6 +31,15 @@ def sha(path):
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             h.update(block)
     return h.hexdigest()
+
+
+def checkpoint_digest(path):
+    """Hash a single checkpoint file or a model directory with the worker's own scheme."""
+    path = Path(path)
+    require(path.exists(), 'checkpoint missing: ' + str(path))
+    if path.is_dir():
+        return directory_identity(path)['sha256']
+    return sha(path)
 
 
 def digest(value):
@@ -272,9 +285,31 @@ def summarize(records, wall=None):
     return result
 
 
-def sweep(args):
+def worker_command(args, staged, config_root, level, samples, checkpoint):
+    """The exact resident-worker invocation for one configuration level."""
+    command = [args.worker_executable, '--input', str(staged), '--output', str(config_root / 'worker'),
+               '--assets', str(Path(args.assets).resolve()), '--checkpoint', str(checkpoint),
+               '--seeds', *map(str, args.seeds), '--samples', str(samples), '--steps', str(args.steps),
+               '--recycles', str(args.recycles), '--max-parallel-samples', str(level),
+               '--output-format', args.output_format]
+    if args.no_kernels:
+        command.append('--no-kernels')
+    return command
+
+
+def validate(args):
+    """Engine limits checked before any directory is created or worker started."""
     levels = sorted(set(args.levels))
     require(levels and min(levels) >= 1, 'levels must be positive')
+    require(levels == [1], 'ESMFold2 samples one trajectory per native call, so only --levels 1 '
+                           'is measurable; got ' + str(levels))
+    require(not args.use_potentials, '--use-potentials has no ESMFold2 equivalent; '
+                                     'the capability is not part of this engine')
+    return levels
+
+
+def sweep(args):
+    levels = validate(args)
     samples = args.samples if args.samples is not None else math.lcm(*levels)
     require(samples >= max(levels), 'samples must be at least maximum parallelism; samples=1 cannot exercise max=6')
     require(all(0 <= s <= 4294967295 for s in args.seeds), 'seeds out of range')
@@ -282,7 +317,7 @@ def sweep(args):
     items = panel(args.input)
     checkpoint = Path(args.checkpoint).resolve()
     require(Path(args.assets).is_dir(), 'assets directory missing')
-    ckhash = sha(checkpoint)
+    ckhash = checkpoint_digest(checkpoint)
     meta = metadata(args.metadata)
     root = Path(args.output).absolute()
     root.mkdir(parents=True, exist_ok=False)  # a new output scope is mandatory
@@ -318,14 +353,7 @@ def sweep(args):
                 continue
             staged = stage_panel(active, config_root)
             full_settings = settings | {'max_parallel_samples': level}
-            command = [args.worker_executable, '--input', str(staged), '--output', str(config_root / 'worker'),
-                       '--assets', str(Path(args.assets).resolve()), '--checkpoint', str(checkpoint),
-                       '--seeds', *map(str, args.seeds), '--samples', str(samples), '--steps', str(args.steps),
-                       '--recycles', str(args.recycles), '--max-parallel-samples', str(level),
-                       '--output-format', args.output_format]
-            for name in ('no_kernels', 'use_potentials'):
-                if getattr(args, name):
-                    command.append('--' + name.replace('_', '-'))
+            command = worker_command(args, staged, config_root, level, samples, checkpoint)
             config['command'] = command
             start = time.perf_counter()
             try:
@@ -496,10 +524,10 @@ def main(argv=None):
     for name in ('input', 'output', 'assets', 'checkpoint'):
         run.add_argument('--' + name, required=True, type=Path)
     run.add_argument('--seeds', nargs='+', type=int, required=True)
-    run.add_argument('--levels', nargs='+', type=int, default=[1, 2, 4, 6])
+    run.add_argument('--levels', nargs='+', type=int, default=[1])
     run.add_argument('--samples', type=int)
-    run.add_argument('--steps', type=int, default=200)
-    run.add_argument('--recycles', type=int, default=3)
+    run.add_argument('--steps', type=int, default=100)
+    run.add_argument('--recycles', type=int, default=20)
     run.add_argument('--no-kernels', action='store_true')
     run.add_argument('--use-potentials', action='store_true')
     run.add_argument('--output-format', choices=('mmcif', 'pdb'), default='mmcif')
@@ -512,6 +540,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == 'sweep':
+            validate(args)
             result = sweep(args)
             print(json.dumps({'status': result['status'], 'output': str(args.output / 'sweep.json')}))
             return 0 if result['status'] == 'completed' else 1

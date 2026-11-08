@@ -41,9 +41,11 @@ Multi-chain inputs such as the shared Zika panel are refused; use the Boltz2 ima
 
 ## Options
 
-`--samples` (independent N=1 calls per seed), `--steps` (num_sampling_steps), `--recycles`
-(num_loops), `--backend fused|reference`, `--no-kernels` (alias for reference), `--resume`,
-`--dry-run`. `--max-parallel-samples` must be 1: the engine samples one trajectory per call.
+`--samples` (independent N=1 calls per seed, default 1), `--steps` (num_sampling_steps, default
+100), `--recycles` (num_loops, default 20), `--backend fused|reference`, `--no-kernels` (alias for
+reference), `--resume`, `--dry-run`. `--max-parallel-samples` must be 1: the engine samples one
+trajectory per call. `cofold-throughput sweep` defaults to the same numbers and refuses levels
+above 1.
 
 Seed mapping is the frozen native one: base seed `S`, one-based sample index `i` →
 `S*1000 + i - 1`.

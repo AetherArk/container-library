@@ -11,7 +11,7 @@ Run from this directory:
 `cheminf` is only an example interpreter: the suite needs `pyyaml`, `numpy`, `rdkit`, `gemmi`
 and `torch` (CPU). The container itself has all of them.
 
-The same 57 tests pass inside an image built from this directory (entrypoint override, code
+The same 68 tests pass inside an image built from this directory (entrypoint override, code
 mounted read-only, no network):
 
 ```sh
@@ -27,8 +27,9 @@ docker run --rm --network=none --user 1000:1000 --entrypoint python \
 | `tests/test_resident.py` | 21 | lifecycle: one load, seed order, resume, receipts, corruption, fatal stop, SIGTERM, output lock |
 | `tests/test_cli_contract.py` | 10 | flag mapping (`--recycles`→loops, `--no-kernels`→reference), rejected settings, shared panel read |
 | `tests/test_verify.py` | 9 | independent verifier on synthetic artifacts: ligand loss, truncation, NaN, coordinate mismatch, PAE shape |
+| `tests/test_sweep_contract.py` | 7 | directory checkpoint hashing, engine defaults, level/`--use-potentials` rejection, worker argv |
 
-Status: 57 tests pass on CPU. `FakeEngine` stands in for the model; no ESMFold2 weights were
+Status: 68 tests pass on CPU. `FakeEngine` stands in for the model; no ESMFold2 weights were
 loaded and no CUDA call was made.
 
 ## Not yet verified
@@ -37,7 +38,8 @@ loaded and no CUDA call was made.
   agreement on GPU output.
 - Image build of `cofolding/esmfold2/Dockerfile` (dependencies reproduced from the qualified
   `local/esmfold2:3.4.1.post1-cu130` image; the build itself has not been run).
-- `cofold-throughput` against this worker (only `--levels 1` is meaningful here).
+- `cofold-throughput sweep` end to end against a real GPU worker; its argument and hashing
+  contract is covered on CPU, but no sweep has executed model inference.
 
 ## GPU acceptance plan (tomorrow)
 

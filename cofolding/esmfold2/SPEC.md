@@ -149,10 +149,13 @@ Independent reader checks on every completed job, without trusting the engine's 
   explicit unavailable reasons.
 - `errors.py`: CUDA OOM classification across the whole engine call scope, per-system skip after
   an OOM, continue with independent systems without reloading the model.
-- `throughput_benchmark.py`: fixed-budget sweeps and five-host aggregation. Because this engine
-  cannot batch samples, only `--levels 1` is meaningful. The worker itself rejects any other
+- `throughput_benchmark.py`: fixed-budget sweeps and five-host aggregation. Defaults follow the
+  engine: `--steps 100`, `--recycles 20`, `--levels 1`, `--samples 1`. Because this engine cannot
+  batch samples, only `--levels 1` is meaningful; both the sweep and the worker reject any other
   level with an explicit message, so a level ladder fails loudly instead of measuring the same
-  work twice.
+  work twice. `--use-potentials` has no equivalent and is rejected rather than forwarded.
+- `--checkpoint` may be a file or a model directory. A directory is hashed once with the worker's
+  own sorted per-file scheme, so `sweep.json` and the worker receipts carry the same digest.
 
 ## 9. Deviations from the Boltz contract
 
