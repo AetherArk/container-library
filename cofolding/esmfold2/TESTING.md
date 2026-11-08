@@ -70,3 +70,16 @@ loaded and no CUDA call was made.
 3. `--resume`: no reload, all jobs reused.
 4. One seed with `--samples 3`: three native calls, seeds `S*1000`, `S*1000+1`, `S*1000+2`.
 5. `cofold-throughput sweep --levels 1` over the examples for the benchmark record.
+
+## Cloud acceptance on a 32 GB GPU (Vast.ai, RTX 5090)
+
+- Image `ghcr.io/aetherark/esmfold2@sha256:6776870886482fb2b53dadc55005799c0c518cbbde026d10a30d7fcb7954fb6d`,
+  pulled anonymously from GHCR in 214 s; instance `59724992` (offer 59535046), $0.96/h.
+- Job `esmfold2-20261108T144730Z-b1a75916c6bf`, attempt `attempt-0312633798c446988a1c57b91c13db0e`.
+- Inputs downloaded and hash-verified in 0.3 s; assets (24.9 GiB) in 304.5 s (~92 MB/s); worker 57.2 s.
+- CYP3A4 + heme + ligand and Trp-cage/ethanol both completed on seed 11, one sample, 200 steps,
+  20 loops, `fused` backend; one checkpoint load, one CPU→GPU transfer.
+- CYP forward 25.0 s; peak allocator 19.14 GB allocated / 20.62 GB reserved of 33.71 GB total. The same
+  input failed on a 16 GB RTX 5070 Ti at 14.5 GB, so this is the first GPU that completes it.
+- Archive 424,345,600 bytes, sha256 `5fc943ef1ae895b40146d8c3692619bd1268c7a2aa6dde8f2d5bd63423c1a63e`;
+  `run.json` status `completed`, both `predictions.jsonl` entries `completed`.

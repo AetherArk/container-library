@@ -63,6 +63,33 @@
    "hourly_rate_usd": 0.28,
    "failure_class": "running",
    "notes": "Accepted launch: image pull, then the assets stage downloading the 24.9 GiB asset set."
+  },
+  {
+   "instance_id": 59720569,
+   "offer_id": 47627489,
+   "machine_id": 40274,
+   "gpu": "RTX 5090 32GB",
+   "hourly_rate_usd": 0.98,
+   "failure_class": "image_pull_timeout",
+   "notes": "17 Gbps host, but the 24 GB image did not finish pulling within 32 minutes; destroyed under the 30-minute image budget."
+  },
+  {
+   "instance_id": 59724271,
+   "offer_id": 59506607,
+   "machine_id": 40507,
+   "gpu": "RTX 5090 32GB",
+   "failure_class": "claim_conflict",
+   "hourly_rate_usd": 0.96,
+   "notes": "Image pulled in 366 s (fast host). The wrapper failed at the create-only claim because attempt-5de1cb5a8f8840248959d1b07c5eaf26 was already claimed by the destroyed 3090 run; started.json existed in R2. A spent attempt needs a freshly prepared job."
+  },
+  {
+   "instance_id": 59724992,
+   "offer_id": 59535046,
+   "machine_id": 40867,
+   "gpu": "RTX 5090 32GB",
+   "hourly_rate_usd": 0.96,
+   "failure_class": "completed",
+   "notes": "Acceptance run: image pull 214 s, inputs 0.3 s, assets 304.5 s, worker 57.2 s. CYP3A4 + heme + ligand and Trp-cage/ethanol both completed with one checkpoint load; peak reserved 20.6 GB of 33.7 GB. Archive 424,345,600 bytes, sha256 5fc943ef1ae895b40146d8c3692619bd1268c7a2aa6dde8f2d5bd63423c1a63e."
   }
  ],
  "blocker": "The 23.9 GB container image cannot be delivered to the provider: GHCR push needs write:packages (token has gist, read:org, repo, workflow) and anonymous ttl.sh rejects the large blob upload with a commit timeout.",
