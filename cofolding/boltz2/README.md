@@ -27,7 +27,8 @@
 - Example inputs: `cofolding/boltz2/tests/fixtures/resident_inputs` (Trp-cage with two small ligands).
 - Native YAML unchanged; every listed seed applies to every input. MSA generation is external; local references must be inside the mounted input/assets directories.
 - Tested input shape: one canonical protein chain, SMILES ligands, explicit empty/local A3M alignment. Resident worker is structure-only; affinity requires the native CLI via [Compose](compose.yaml).
-- Options: `--samples`, `--recycles`, `--steps`, `--max-parallel-samples`, `--use-potentials`; `--no-kernels` is the tested Blackwell route.
+- Options: `--samples`, `--recycles`, `--steps`, `--max-parallel-samples`, `--use-potentials`, `--capture {full,none}`; `--no-kernels` is the tested Blackwell route.
+- `--capture none` omits the per-job `capture/` tensors (89% of output at panel scale) and keeps the structures, confidence JSON, PAE/PDE/pLDDT arrays, embeddings, receipts and metrics; `full` is the default.
 - `--resume`: verify/reuse completed jobs; `--dry-run`: print the resolved launch command. Limits and interruption grace: `run_cofold.py --help`.
 
 ## Cloud transport

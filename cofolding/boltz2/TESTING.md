@@ -38,3 +38,21 @@
 - `result.json` summarizes the batch verification; `--dry-run` does not produce a PASS report. See the case READMEs for native output inventories.
 - Image setup and Trp-cage–ethanol execution/resume checks also passed on RTX 5070 Ti.
 - No binding/accuracy claim or registry publication.
+
+## Capture opt-out (`--capture none`)
+
+- Image: `container-library/boltz2:issue6-capture`; one Trp-cage/ethanol input, seed 11, one sample,
+  three recycles, 200 steps, `--no-kernels`, RTX 5070 Ti.
+- Both modes completed (`run.json` status `completed`) and wrote the same native inventory:
+  `trpcage_model_0.cif`, `confidence_trpcage_model_0.json`, `pae/pde/plddt_trpcage_model_0.npz`,
+  `embeddings_trpcage.npz`, and the processed inputs — every file byte-identical between modes.
+- `--capture none` wrote no `capture/` directory and no `*_inventory.json`; it wrote
+  `prediction_summary.pt` (coords, masks, PAE/PDE/pLDDT, pLDDT/IPTM scalars, `s`, `z`) instead.
+  Attempt size fell from 3,908 KB to 2,400 KB; `capture/` alone was 1,820 KB of the full attempt.
+- `benchmark_metrics.json`: 11 fields identical, 5 timing fields differ (forward/predict-step/output
+  write); `capture_hook_write_seconds` is 0.0 with capture off. `predictions.jsonl` reports
+  `completed`/seed 11 in both modes.
+- Verification difference: with `capture none` the verifier cannot cross-check the consumed batch or
+  the raw forward tensors; it still checks structure geometry against the saved coordinates, the
+  confidence scalars, the PAE/PDE/pLDDT pairing, the embeddings, the rank bijection and the exact
+  native file inventory.
