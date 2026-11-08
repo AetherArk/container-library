@@ -345,10 +345,11 @@ class CaptureContract(unittest.TestCase):
         self.assertEqual(parser.parse_args(['--capture', 'none']).capture, 'none')
 
     def test_summary_packet_survives_without_capture_directory(self):
-        import shutil, tempfile as tf, torch
+        import shutil, tempfile as tf
         try:
+            import torch
             from resident.native import save_summary
-        except ModuleNotFoundError as error:  # boltz is installed only inside the image
+        except ModuleNotFoundError as error:  # torch/boltz are installed only inside the image
             self.skipTest(str(error))
         attempt = Path(tf.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(attempt))
         coords = torch.zeros((1, 4, 3))
