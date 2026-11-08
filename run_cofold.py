@@ -92,6 +92,8 @@ def command(a, image, token):
            '--env', 'TMPDIR=/outputs/.runtime/tmp', '--env', 'XDG_CACHE_HOME=/outputs/.runtime/cache',
            '--env', 'TRITON_CACHE_DIR=/outputs/.runtime/cache/triton',
            '--env', 'NUMBA_CACHE_DIR=/outputs/.runtime/cache/numba',
+           '--env', 'TORCHINDUCTOR_CACHE_DIR=/outputs/.runtime/cache/torchinductor',
+           '--env', 'TORCH_HOME=/outputs/.runtime/cache/torch',
            '--env', 'HF_HOME=/outputs/.runtime/cache/hf', '--env', 'HF_HUB_OFFLINE=1',
            '--env', 'COFOLD_IMAGE_ID=' + image]
     for source, target, readonly in ((a.inputs, '/inputs', True), (a.assets, '/models', True),

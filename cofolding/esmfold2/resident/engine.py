@@ -4,6 +4,7 @@ Accepts the shared native YAML entity format used by the Boltz2 container and ma
 engine's single-protein, single-ligand, optional-heme input. Every rejection names the engine
 capability that is missing, so an unsupported system never becomes an unexplained failure.
 """
+from dataclasses import fields, is_dataclass, replace
 from collections import Counter
 import hashlib
 import json
@@ -94,6 +95,9 @@ def capability(data, label):
 def cpu(value):
     if torch.is_tensor(value):
         return value.detach().cpu()
+    if is_dataclass(value) and not isinstance(value, type):
+        return replace(value, **{field.name: cpu(getattr(value, field.name))
+                                 for field in fields(value) if field.init})
     if isinstance(value, dict):
         return {str(key): cpu(child) for key, child in value.items()}
     if isinstance(value, (list, tuple)):
@@ -111,6 +115,12 @@ def save_packet(directory, label, value):
             items[path] = {'shape': list(item.shape), 'dtype': str(item.dtype),
                            'finite': bool(torch.isfinite(item).all())
                                      if item.is_floating_point() or item.is_complex() else True}
+        elif isinstance(item, np.ndarray):
+            items[path] = {'shape': list(item.shape), 'dtype': str(item.dtype),
+                           'finite': bool(np.isfinite(item).all()) if np.issubdtype(item.dtype, np.number) else True}
+        elif is_dataclass(item) and not isinstance(item, type):
+            for field in fields(item):
+                walk(getattr(item, field.name), path + '/' + field.name)
         elif isinstance(item, dict):
             for key, child in item.items():
                 walk(child, path + '/' + str(key))
@@ -214,7 +224,7 @@ class ESMFold2Engine:
             raise RuntimeError('second checkpoint load refused')
         if not torch.cuda.is_available():
             raise RuntimeError('resident native inference requires CUDA; CPU tests use FakeEngine')
-        from esm.models.esmfold2 import EsmFold2InputBuilder, EsmFold2Model
+        from esm.models.esmfold2 import ESMFold2InputBuilder, EsmFold2Model
         started = time.perf_counter()
         if not self.checkpoint_files:
             self.checkpoint_files = directory_identity(self.checkpoint)['files']
@@ -223,7 +233,7 @@ class ESMFold2Engine:
         model = model.to('cuda').eval()
         model.set_kernel_backend(None if self.settings.backend == 'reference' else self.settings.backend)
         self.model = model
-        self.builder = EsmFold2InputBuilder(ccd_cache=self.checkpoint)
+        self.builder = ESMFold2InputBuilder(ccd_cache=self.checkpoint)
         self.checkpoint_load_count += 1
         self.cpu_to_gpu_transfer_count += 1
         torch.cuda.synchronize()
@@ -305,7 +315,9 @@ class ESMFold2Engine:
                 'sample_index': index + 1, 'sample_seed': sample_seed,
                 'plddt_mean': float(np.asarray(result.plddt).mean()),
                 'ptm': float(result.ptm), 'iptm': float(result.iptm),
-                'residues': int(np.asarray(result.plddt).shape[0]),
+                'residues': prepared['chemistry']['residues'],
+                'tokens': int(np.asarray(result.plddt).shape[0]),
+                'plddt_scope': 'native_atom_expanded_token',
                 'chains': prepared['entities'],
                 'pae_shape': list(np.asarray(result.pae).shape)})
             save_packet(capture, 'prepared_features_sample_' + str(index + 1),

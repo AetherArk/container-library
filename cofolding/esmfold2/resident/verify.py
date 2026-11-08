@@ -57,6 +57,10 @@ def verify_job(prepared, attempt, settings):
         heme_reference = Chem.MolFromSmiles(chemistry['heme']['consumed_smiles'])
         require(heme_reference is not None, 'consumed heme SMILES not parseable')
 
+    # Native confidence is indexed by protein residues plus atom-expanded
+    # ligand/heme tokens, not by protein residues alone.
+    tokens = protein_residues + sum(mol.GetNumHeavyAtoms() for mol in
+                                    (ligand_reference, heme_reference) if mol is not None)
     confidence_files = sorted(native.glob('confidence_*.json'))
     require(len(confidence_files) == samples, 'confidence file count does not match samples')
     for index in range(samples):
@@ -93,10 +97,12 @@ def verify_job(prepared, attempt, settings):
         with np.load(native / ('pae_' + label + '.npz'), allow_pickle=False) as arrays:
             pae = arrays['pae']
         require(pae.ndim == 2 and pae.shape[0] == pae.shape[1], 'PAE must be square')
+        require(pae.shape == (tokens, tokens), 'PAE token coverage mismatch')
+        require(confidence.get('tokens') == tokens, 'confidence token count mismatch')
         require(np.isfinite(pae).all(), 'non-finite PAE')
         with np.load(native / ('plddt_' + label + '.npz'), allow_pickle=False) as arrays:
             plddt = arrays['plddt']
-        require(plddt.shape[0] == protein_residues, 'per-residue pLDDT length mismatch')
+        require(plddt.shape == (tokens,), 'native token pLDDT length mismatch')
         require(np.isfinite(plddt).all(), 'non-finite pLDDT')
 
         packet = capture / ('full_result_sample_' + str(index + 1) + '.pt')

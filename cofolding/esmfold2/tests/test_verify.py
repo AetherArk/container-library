@@ -13,6 +13,7 @@ from resident import verify as verifier  # noqa: E402
 RESIDUES = 5
 LIGAND_SMILES = 'CCO'
 LIGAND_ELEMENTS = ['C', 'C', 'O']
+TOKENS = RESIDUES + len(LIGAND_ELEMENTS)
 PROTEIN_ATOMS = ['N', 'CA', 'C', 'O']
 
 
@@ -82,12 +83,12 @@ class VerifyTests(unittest.TestCase):
         label = 'tiny_sample_1'
         (self.attempt / 'native' / f'confidence_{label}.json').write_text(json.dumps({
             'sample_index': 1, 'sample_seed': 11000, 'plddt_mean': 70.0, 'ptm': 0.5, 'iptm': 0.4,
-            'residues': RESIDUES, 'chains': ['A', 'L'],
-            'pae_shape': [RESIDUES + 1, RESIDUES + 1]}))
+            'residues': RESIDUES, 'tokens': TOKENS, 'chains': ['A', 'L'],
+            'pae_shape': [TOKENS, TOKENS]}))
         np.savez_compressed(self.attempt / 'native' / f'pae_{label}.npz',
-                            pae=np.zeros((RESIDUES + 1, RESIDUES + 1), dtype=np.float32))
+                            pae=np.zeros((TOKENS, TOKENS), dtype=np.float32))
         np.savez_compressed(self.attempt / 'native' / f'plddt_{label}.npz',
-                            plddt=np.full(RESIDUES, 70.0, dtype=np.float32))
+                            plddt=np.full(TOKENS, 70.0, dtype=np.float32))
         import torch
         torch.save(Result(self.positions), self.attempt / 'capture' / 'full_result_sample_1.pt')
         (self.attempt / 'capture' / 'full_result_sample_1_inventory.json').write_text(json.dumps({
@@ -143,6 +144,18 @@ class VerifyTests(unittest.TestCase):
         np.savez_compressed(self.attempt / 'native' / f'pae_{label}.npz',
                             pae=np.zeros((2, 3), dtype=np.float32))
         with self.assertRaisesRegex(ValueError, 'PAE must be square'):
+            self.verify()
+
+    def test_square_but_truncated_pae_fails(self):
+        np.savez_compressed(self.attempt / 'native' / 'pae_tiny_sample_1.npz',
+                            pae=np.zeros((RESIDUES, RESIDUES), dtype=np.float32))
+        with self.assertRaisesRegex(ValueError, 'PAE token coverage'):
+            self.verify()
+
+    def test_protein_only_plddt_cannot_cover_ligand_tokens(self):
+        np.savez_compressed(self.attempt / 'native' / 'plddt_tiny_sample_1.npz',
+                            plddt=np.full(RESIDUES, 70.0, dtype=np.float32))
+        with self.assertRaisesRegex(ValueError, 'token pLDDT length'):
             self.verify()
 
     def test_chain_set_must_match_request(self):
