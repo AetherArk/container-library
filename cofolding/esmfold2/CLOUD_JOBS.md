@@ -68,6 +68,18 @@ the receipt. Completion requires worker exit 0 and native `run.json.status: comp
 | Rejected settings | — | `max_parallel_samples != 1`, `backend` outside `fused/reference`, `output_format != mmcif` |
 | Job id prefix | `boltz2-` | `esmfold2-` |
 
+## Provider pitfalls learned on Vast.ai
+
+- `--env` takes docker syntax: `-e KEY=VALUE`. A bare `KEY=VALUE` is parsed as a port mapping and
+  the worker starts with no spec, failing with "cloud attempt failed".
+- An attempt is single-use. The create-only claim (`started.json`) is written before the assets
+  stage, so any aborted run spends the attempt; `prepare` a new job instead of rerunning the old one.
+- Image pull dominates first-run time. On a host that pulled the 24 GB image in 214-366 s the whole
+  job finished in ~6 minutes; one 17 Gbps host never finished the pull in 32 minutes. Probe a host
+  for a bounded pull window and destroy it when the workload has not started.
+- Rent in args/entrypoint mode (`--entrypoint /opt/cofold/cofold-cloud-run`); the ssh/jupyter mode
+  injects sshd into an image that has none.
+
 ## Operator duties
 
 - Monitor the exact receipt; stop the paid instance on success, failure or expiry and verify
