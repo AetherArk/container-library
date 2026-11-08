@@ -42,7 +42,7 @@
 
 | Entity | Supported |
 |---|---|
-| Protein | exactly one chain, canonical sequence |
+| Protein | one chain, canonical sequence (container scope; upstream accepts several) |
 | Ligand | one SMILES ligand |
 | Heme | one optional ligand containing iron (chain H) |
 | MSA | `empty` only |

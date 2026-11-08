@@ -1,8 +1,11 @@
 """Pinned ESMFold2 3.4.1.post1 native preparation/model/writer boundary (GPU runtime).
 
 Accepts the shared native YAML entity format used by the Boltz2 container and maps it onto the
-engine's single-protein, single-ligand, optional-heme input. Every rejection names the engine
-capability that is missing, so an unsupported system never becomes an unexplained failure.
+engine's one-ligand-plus-optional-heme input in the single-protein-chain scope this container
+qualifies. The upstream input builder accepts several protein chains, RNA/DNA chains, per-chain
+MSA, pocket conditioning and covalent bonds; those are outside the qualified scope. Every
+rejection names the rule that rejected the system, so an unsupported system never becomes an
+unexplained failure.
 """
 from dataclasses import fields, is_dataclass, replace
 from collections import Counter
@@ -96,7 +99,8 @@ def capability(data, label):
         else:
             raise ValueError(label + ': unsupported entity type ' + kind)
     if len(proteins) != 1:
-        raise ValueError(label + ': ESMFold2 takes exactly one protein chain, got ' + str(len(proteins)))
+        raise ValueError(label + ': this container qualifies exactly one protein chain; the upstream '
+                                'model accepts several. Got ' + str(len(proteins)))
     heme, plain = [], []
     for entry in ligands:
         (heme if canonical_smiles(entry['smiles'])[1]['iron_atoms'] else plain).append(entry)
