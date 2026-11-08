@@ -65,8 +65,8 @@ def validate(a):
         setattr(a, name, mount_path(getattr(a, name)))
     if not a.inputs.is_dir():
         raise ValueError('Inputs must be a directory; the selected worker parses its native files')
-    if not a.assets.is_dir() or not a.checkpoint.is_file():
-        raise ValueError('Assets directory and explicit checkpoint file must exist')
+    if not a.assets.is_dir() or not (a.checkpoint.is_file() or a.checkpoint.is_dir()):
+        raise ValueError('Assets directory and explicit checkpoint file or directory must exist')
     for source in (a.inputs, a.assets, a.checkpoint):
         if a.output == source or a.output in source.parents or source in a.output.parents:
             raise ValueError('Output must not overlap read-only inputs/assets/checkpoint')
