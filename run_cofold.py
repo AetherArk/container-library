@@ -67,8 +67,8 @@ def validate(a):
         setattr(a, name, mount_path(getattr(a, name)))
     if not a.inputs.is_dir():
         raise ValueError('Inputs must be a directory; the selected worker parses its native files')
-    if not a.assets.is_dir() or not a.checkpoint.is_file():
-        raise ValueError('Assets directory and explicit checkpoint file must exist')
+    if not a.assets.is_dir() or not (a.checkpoint.is_file() or a.checkpoint.is_dir()):
+        raise ValueError('Assets directory and explicit checkpoint file or directory must exist')
     for source in (a.inputs, a.assets, a.checkpoint):
         if a.output == source or a.output in source.parents or source in a.output.parents:
             raise ValueError('Output must not overlap read-only inputs/assets/checkpoint')
@@ -94,6 +94,8 @@ def command(a, image, token):
            '--env', 'TMPDIR=/outputs/.runtime/tmp', '--env', 'XDG_CACHE_HOME=/outputs/.runtime/cache',
            '--env', 'TRITON_CACHE_DIR=/outputs/.runtime/cache/triton',
            '--env', 'NUMBA_CACHE_DIR=/outputs/.runtime/cache/numba',
+           '--env', 'TORCHINDUCTOR_CACHE_DIR=/outputs/.runtime/cache/torchinductor',
+           '--env', 'TORCH_HOME=/outputs/.runtime/cache/torch',
            '--env', 'HF_HOME=/outputs/.runtime/cache/hf', '--env', 'HF_HUB_OFFLINE=1',
            '--env', 'COFOLD_IMAGE_ID=' + image]
     for source, target, readonly in ((a.inputs, '/inputs', True), (a.assets, '/models', True),

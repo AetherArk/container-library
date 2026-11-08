@@ -32,6 +32,17 @@ class LauncherUnitTests(unittest.TestCase):
                      '--output', str(self.root / 'results'), '--gpu', GPU, '--seeds', '11', '12',
                      '--lock-root', str(self.root / 'locks')]
 
+    def test_checkpoint_may_be_a_directory(self):
+        model = self.root / 'model'
+        model.mkdir()
+        (model / 'config.json').write_text('{}')
+        argv = list(self.argv)
+        argv[argv.index('--checkpoint') + 1] = str(model)
+        args = launcher.parser().parse_args(argv)
+        launcher.validate(args)
+        launcher.command(args, 'sha256:' + 'a' * 64, 'token')
+        self.assertTrue(model.is_dir())
+
     def test_input_format_is_owned_by_selected_worker(self):
         for file in (self.root / 'inputs').iterdir():
             file.unlink()
