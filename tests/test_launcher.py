@@ -215,6 +215,89 @@ class LauncherUnitTests(unittest.TestCase):
         self.assertEqual(a.memory, '36g')
         self.assertEqual(a.cpus, 8)
 
+    def test_benchmark_metadata_is_inside_inputs_and_forwarded_as_container_path(self):
+        inside = self.root / 'inputs' / 'meta.json'
+        inside.write_text('{"provider": "unit-test"}')
+        args = launcher.parser().parse_args(self.argv + ['--benchmark-metadata', str(inside)])
+        launcher.validate(args)
+        cmd = launcher.command(args, IMAGE, 'token')
+        forwarded = cmd[cmd.index('--benchmark-metadata') + 1]
+        self.assertEqual(forwarded, '/inputs/meta.json')
+        self.assertNotIn(str(self.root), forwarded)
+
+    def test_benchmark_metadata_outside_inputs_missing_or_not_a_file_is_rejected(self):
+        outside = self.root / 'meta.json'
+        outside.write_text('{}')
+        (self.root / 'inputs' / 'nested').mkdir()
+        for extra in (['--benchmark-metadata', str(outside)],
+                      ['--benchmark-metadata', str(self.root / 'inputs' / 'absent.json')],
+                      ['--benchmark-metadata', str(self.root / 'inputs' / 'nested')]):
+            with self.subTest(extra=extra), patch.object(launcher, 'resolve_image') as image:
+                self.assertEqual(launcher.main(self.argv + extra), 2)
+                image.assert_not_called()
+
+    def test_job_timeout_is_validated_and_forwarded(self):
+        for value in ('0', '-1', 'nan', 'inf'):
+            with self.subTest(value=value), patch.object(launcher, 'resolve_image') as image:
+                self.assertEqual(launcher.main(self.argv + ['--job-timeout', value]), 2)
+                image.assert_not_called()
+        args = launcher.parser().parse_args(self.argv + ['--job-timeout', '900'])
+        launcher.validate(args)
+        cmd = launcher.command(args, IMAGE, 'token')
+        self.assertEqual(cmd[cmd.index('--job-timeout') + 1], '900.0')
+
+    def test_termination_json_written_on_timeout_with_container_and_progress(self):
+        polls = [None, None, 137]
+        process = Mock(poll=Mock(side_effect=lambda: polls.pop(0) if polls else 137),
+                       wait=Mock(return_value=137))
+        def popen(cmd):
+            cidfile = Path(cmd[cmd.index('--cidfile') + 1])
+            cidfile.write_text('c' * 64)
+            (cidfile.parents[1] / 'progress.json').write_text(json.dumps({'schema': 1, 'jobs_completed': 2}))
+            return process
+        with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                patch.object(launcher, 'gpu_available'), patch.object(launcher.subprocess, 'Popen', side_effect=popen), \
+                patch.object(launcher, 'owned_signal', return_value=True), \
+                patch.object(launcher.time, 'monotonic', side_effect=[0, 5, 10]), patch.object(launcher.time, 'sleep'):
+            self.assertEqual(launcher.main(self.argv + ['--timeout', '3']), 124)
+        termination = json.loads((self.root / 'results' / 'termination.json').read_text())
+        self.assertEqual(termination['schema'], 1)
+        self.assertEqual(termination['reason'], 'timeout')
+        self.assertIsNone(termination['signal'])
+        self.assertEqual(termination['exit_code'], 124)
+        self.assertEqual(termination['container_id'], 'c' * 64)
+        self.assertEqual(termination['last_progress']['jobs_completed'], 2)
+        self.assertGreater(termination['timestamp_unix'], 0)
+
+    def test_no_termination_json_on_success(self):
+        def popen(cmd):
+            (self.root / 'results/run.json').write_text(json.dumps({'status': 'complete'}))
+            return Mock(poll=Mock(return_value=0), wait=Mock(return_value=0))
+        with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                patch.object(launcher, 'gpu_available'), patch.object(launcher.subprocess, 'Popen', side_effect=popen):
+            self.assertEqual(launcher.main(self.argv), 0)
+        self.assertFalse((self.root / 'results' / 'termination.json').exists())
+
+    def test_termination_reason_signal_names_the_launcher_signal(self):
+        handlers = {}
+        def register(sig, fn):
+            old = handlers.get(sig, signal.SIG_DFL)
+            handlers[sig] = fn
+            return old
+        polls = [None, None, 143]
+        process = Mock(poll=Mock(side_effect=lambda: polls.pop(0) if polls else 143),
+                       wait=Mock(return_value=143))
+        def popen(cmd):
+            handlers[signal.SIGINT](signal.SIGINT, None)
+            return process
+        termination = {}
+        with patch.object(launcher.signal, 'signal', side_effect=register), \
+                patch.object(launcher.subprocess, 'Popen', side_effect=popen), \
+                patch.object(launcher, 'owned_signal', return_value=True), \
+                patch.object(launcher.time, 'monotonic', side_effect=[0, 1, 4]), patch.object(launcher.time, 'sleep'):
+            self.assertEqual(launcher.run_worker(['docker', 'run'], self.root / 'owned.cid', None, 2, termination), 143)
+        self.assertEqual(termination, {'reason': 'signal', 'signal': 'SIGINT'})
+
 
 if __name__ == '__main__':
     unittest.main()

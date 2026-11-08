@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import threading
 import time
+import traceback
 import uuid
 
 SCHEMA = 1
@@ -52,6 +53,51 @@ def load_metadata(path=None):
 def error_label(exc):
     # Exception messages can contain capabilities, passwords or input URL values.
     return type(exc).__name__ + ': details suppressed; see phase and local inputs'
+
+
+# Redaction governs credentials, not the diagnosis: the type, message, phase and
+# traceback of a failure must survive in failure.json. Ordered: URLs first, then
+# key=value pairs, then opaque blobs. Absolute paths are left as written.
+REDACT_PATTERNS = (
+    # Keep scheme://host/path and drop the query string, which carries signatures.
+    (re.compile(r'(?i)\b([a-z][a-z0-9+.\-]*://[^\s?#]+)\?[^\s#]*'), r'\1'),
+    (re.compile(r'(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=\-]{8,}'), r'\1 [REDACTED]'),
+    (re.compile(r'(?i)([A-Za-z0-9_.\-]*(?:TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL)[A-Za-z0-9_.\-]*\s*=\s*)'
+                r'(?:"[^"]*"|\'[^\']*\'|[^\s,;]+)'), r'\1[REDACTED]'),
+    (re.compile(r'\b[0-9a-fA-F]{32,}\b'), '[HEX_REDACTED]'),
+    # No '/', so absolute paths in a traceback survive. Require both cases, so an
+    # uppercase-only protein or nucleotide sequence in a diagnosis is left alone;
+    # a mixed-case blob is the base64/secret shape. An uppercase-only secret survives.
+    (re.compile(r'(?<![A-Za-z0-9+=])(?=[A-Za-z0-9+=]*[a-z])(?=[A-Za-z0-9+=]*[A-Z])'
+                r'[A-Za-z0-9+=]{32,}(?![A-Za-z0-9+=])'), '[BLOB_REDACTED]'),
+)
+
+
+def redact(text):
+    for pattern, replacement in REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def write_failure(attempt, job, exc):
+    """Write <attempt>/failure.json atomically and reference it from the receipt.
+
+    Call this inside the exception handler, before any release_exception(), so the
+    traceback still exists. The receipt (written by the worker) then carries
+    job['failure'] = 'failure.json', so receipt -> failure.json is followable.
+    """
+    from .worker import atomic_json
+    attempt = Path(attempt)
+    payload = {'schema': SCHEMA,
+               'error_kind': job.get('error_kind') or 'native_error',
+               'phase': job.get('phase'),
+               'exception_type': type(exc).__name__,
+               'message': redact(str(exc))[:4096],
+               'traceback_tail': redact(traceback.format_exc())[-2000:],
+               'attempt_path': str(attempt)}
+    atomic_json(attempt / 'failure.json', payload)
+    job['failure'] = 'failure.json'
+    return payload
 
 
 def read_text(path):

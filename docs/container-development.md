@@ -44,10 +44,15 @@ Method-specific modules are expected. Do not copy another method's engine code.
 
     cofold-run --input DIR --output DIR --assets DIR --checkpoint PATH --seeds 11 12 \
                --samples N --steps N --recycles N [--max-parallel-samples N] \
-               [--output-format mmcif|pdb] [--resume] [--metadata JSON] [--capture full|none]
+               [--output-format mmcif|pdb] [--resume] [--benchmark-metadata PATH] [--capture full|none]
 
 - Flag names and meanings are shared across methods wherever the engine allows it; the same flag
   must mean the same thing in every container.
+- `--benchmark-metadata PATH` takes a JSON file of caller metadata under a fixed, size-bounded
+  allowlist — provider/region/zone/machine/gpu identifiers and `price_per_hour`; it is not an
+  environment dump and any other key is dropped. The value is forwarded by the launcher, which
+  mounts its input directory at `/inputs` and passes `/inputs/<relative path>`; the same file also
+  feeds cloud transport.
 - Where an engine cannot honor a flag, reject the unsupported value with an explicit message instead
   of accepting and ignoring it. ESMFold2 rejects `--max-parallel-samples` above 1 and
   `--output-format pdb` for that reason.
@@ -71,11 +76,13 @@ Identical across methods so one launcher and one reader serve all of them:
     OUTPUT/
       run.json               inputs, seeds, settings, identity, job outcomes, load count, status
       progress.json          lightweight live status
+      termination.json       launcher-only record of a killed or signalled run
       benchmark.json         stage timers, hardware, sampled GPU/memory
       predictions.jsonl      append-only per-sample rows
       events.jsonl           append-only structured events
       jobs/<identity-key>/<attempt-id>/
         receipt.json         status, identity, sha256 of every file in the attempt
+        failure.json         failed attempts only; redacted diagnosis, referenced by the receipt
         capture/             full tensors (see §6)
         native/              engine writer output plus confidence arrays
         inputs/, source/     the exact consumed input and implementation reference
@@ -86,10 +93,17 @@ Per-method additions are allowed and must be named in `SPEC.md`: ESMFold2 writes
 `chemistry.json`, `protocol.json` (resolved settings and seed formula) and
 `checkpoint-lock.json` next to the files above.
 
+- Every JSON artifact carries an integer `schema`: `run.json`, `progress.json`, `receipt.json` and
+  each `predictions.jsonl`/`events.jsonl` row. The key sets above are frozen for a given version:
+  readers ignore unknown keys and reject a higher version rather than guessing.
+- `progress.json` also carries `updated_at_unix` and `pid`, so a silent run is distinguishable from
+  a live one.
+- A failed attempt carries `failure.json`, referenced from its `receipt.json` as
+  `failure: 'failure.json'` (see §9).
 - `predictions.jsonl` keeps the shared schema: `job_key`, `input`, `seed`, `sample_index`,
   `seed_occurrence`, `status`, `verified`, `error_kind`, `output`, `metrics`, `metrics_scope`.
-- `metrics_scope` states what the timing covers, for example `input_seed_batch` or
-  `input_seed_sample_not_batch`.
+- `metrics_scope` states what the timing covers; the single value both containers emit is
+  `input_seed_batch_not_individual_sample`.
 
 ## 6. Heavy outputs
 
@@ -127,17 +141,56 @@ Verification is an independent reader over the written files, not a trust statem
   otherwise the job gets a new attempt directory and the interrupted attempt stays in place.
 - A directory checkpoint is hashed once with the worker's own sorted per-file scheme, so the sweep
   and the receipt carry the same digest.
-- Exit codes: `0` all requested jobs completed or reused, `1` failure or fatal, `143` stopped at a
-  job boundary.
+- Exit codes, published as the full table:
+
+  | Code | Meaning |
+  |---|---|
+  | `0` | all requested jobs completed or reused |
+  | `1` | at least one job failed, or the run went fatal |
+  | `2` | rejected before any job (invalid invocation, unsafe paths, busy GPU/output) |
+  | `124` | whole-run `--timeout` reached; the launcher killed its container |
+  | `143` | stopped at a job boundary (`SIGTERM`, or a drained interrupt) |
+  | `137` | killed (`SIGKILL` after `--stop-grace`, or an outside kill) |
+
+  `run.json.status` is authoritative: `completed`, `failed`, `stopped` or `fatal`. A batch driver
+  that needs to know what happened reads it, not the exit code alone. When the launcher kills or is
+  signalled it writes `termination.json` (§9) before returning `124`, `128+signal` or `137`.
 
 ## 9. Instrumentation and failure handling
 
+The observability contract below is implemented and tested in both containers:
+
 - Stage timers: identity, preparation, model load, prediction, verification, receipt.
+- Logs are structured events, not prose. `stdout` carries exactly one line-delimited JSON record per
+  event, byte-identical to the row appended to `events.jsonl` (`Benchmark.append(..., stdout=True)`
+  prints the same line it writes), so `docker logs`, a redirect or a cloud log sink is a sink and a
+  third container needs no new format. `events.jsonl` inside `OUTPUT` stays authoritative; rotation
+  and retention are the operator's business.
+- `progress.json` carries `schema`, `updated_at_unix` and `pid` beside the job counters, so a silent
+  run is distinguishable from a live one.
+- Every failed attempt writes `failure.json` in the attempt directory — `schema`, `error_kind`,
+  `phase`, `exception_type`, the message (≤4 KiB) and a traceback tail — and its `receipt.json`
+  carries `failure: 'failure.json'`, so a reader can follow receipt → `failure.json`. Redaction
+  removes credentials only: URL query strings, bearer/basic tokens, 32+ character hex/base64 blobs
+  and `KEY=VALUE` pairs for keys containing `TOKEN`, `SECRET`, `PASSWORD`, `KEY` or `CREDENTIAL`.
+  The diagnosis — type, message, phase, traceback — survives; without it a missing MSA, an
+  unparseable SMILES and an OOM are one indistinguishable string.
+- `termination.json` is written by the launcher, never by the worker, and only when it kills its
+  container or the run ends by a signal: `schema`, `reason` (`timeout`|`signal`), `signal`,
+  `exit_code`, `container_id`, `last_progress` (the parsed `progress.json`) and `timestamp_unix`.
+  A normal successful exit never writes it.
+- Job timeouts: `--job-timeout SECONDS` is accepted by both workers and forwarded by the launcher.
+  A job over the limit is a recorded result, `error_kind: 'timeout'`, written through the same failed
+  path as any other failure (including `failure.json`), and the remaining jobs still run. The
+  deadline is checked around the model call and at sample/job boundaries; nothing raises a signal
+  inside CUDA code, so the guarantee is a recorded timeout at the next boundary, not in-kernel
+  cancellation.
 - Resource sampling: CPU, RAM, IO, cgroup, sampled GPU memory and utilization, with explicit
   unavailable reasons when a value cannot be read.
 - CUDA OOM is classified across the whole engine call scope, the affected system is skipped, the
   model is not reloaded, and independent systems continue. An OOM on a device is a result to record,
-  not a defect to hide.
+  not a defect to hide. Remaining jobs of that input are `skipped` with `blocked_by` the failed job;
+  the recovery attempt fails closed to `fatal` when the model snapshot or health check differs.
 - One checkpoint load per invocation, across every input × seed × sample; record the load count and
   verify it from two completed jobs.
 - A sweep tool rejects settings the engine cannot express instead of measuring the same work twice

@@ -128,3 +128,16 @@ loaded and no CUDA call was made.
   13.10 GiB.
 - Same source revision as the rc2 acceptance run above; rc3 is the artifact to deploy because it
   comes from the repository workflow.
+
+## Observability contract acceptance (RTX 5070 Ti, local image)
+
+Image `container-library/esmfold2:obs-smoke` built from this branch, run through `run_cofold.py` on
+GPU 1 with Trp-cage/ethanol, seed 11, one sample:
+
+- The valid input `completed`; the malformed YAML failed with `error_kind: native_error` and wrote
+  `failure.json` carrying the YAML `ScannerError` message and location; one checkpoint load.
+- `run.json` and `progress.json` carry `schema: 1`; `progress.json` carries `pid` and
+  `updated_at_unix`; the receipt references `failure.json`.
+- CPU: 122 tests pass, 2 skipped, run with an interpreter that has the container's dependencies
+  (`numpy`, `rdkit`, `gemmi`); the four import errors seen under the PyYAML-only interpreter are
+  environmental and reproduce without these changes.

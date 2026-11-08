@@ -79,7 +79,8 @@ cofold-run --input /inputs --output /outputs --assets /models --checkpoint /mode
 | `--max-parallel-samples` | must be `1`; other values are rejected | same flag, batching supported there |
 | `--output-format` | `mmcif`/`cif` only | same flag, `pdb` also allowed there |
 | `--resume` | verify and reuse intact jobs | same |
-| `--metadata` | optional allowlisted host metadata for the benchmark | same |
+| `--benchmark-metadata` | optional allowlisted caller metadata JSON (`/inputs/<name>`, forwarded by the launcher) | same |
+| `--job-timeout` | per input × seed job seconds; overrun is recorded as `error_kind: 'timeout'` | same |
 
 Defaults: `--samples 1 --steps 200 --recycles 20 --backend fused --max-parallel-samples 1`, which are
 the engine's own `fold()` defaults. `protocol.json` records both the keyword arguments the worker
@@ -101,32 +102,37 @@ Identical layout to Boltz, so one launcher and one reader serve both images.
 ```
 OUTPUT/
   run.json                 inputs, seeds, settings, identity, job outcomes, load count, status
-  progress.json            lightweight live status
+  progress.json            lightweight live status (+ schema, updated_at_unix, pid)
+  termination.json         launcher-written, only for a killed or signalled run
   benchmark.json           stage timers, hardware, sampled GPU/memory
   predictions.jsonl        append-only per-sample rows
   events.jsonl             append-only structured events
   jobs/<identity-key>/<attempt-id>/
-    receipt.json           {status, identity, sha256: {path: hash}} for every file in the attempt
+    receipt.json           {schema, status, identity, sha256: {path: hash}} for every file in the attempt
+    failure.json           failed attempts only: schema, error_kind, phase, exception_type,
+                           redacted message, traceback_tail, attempt_path (receipt-referenced)
     chemistry.json         consumed SMILES, canonical SMILES, heavy atoms, charge, formula
     protocol.json          resolved engine settings, seed mapping, precision statement
     checkpoint-lock.json   model id, revision, per-file hashes
-    capture/
-      prepared_features.pt observed forward kwargs
-      raw_model_output.pt  observed forward result
-      full_result.pt       complete native result object
-      full_result.npz/.json portable arrays plus JSON structure
-      full_result_inventory.json  path, shape, dtype, finiteness per tensor
-    native/
-      prediction.cif       native writer output
-      confidence.json      pLDDT/PAE summary scalars, per-residue pLDDT, chain mapping
-      confidence_pae.npz   native PAE matrix
+    capture/               per sample N (one-based)
+      prepared_features_sample_N.pt     observed forward kwargs
+      raw_model_output_sample_N.pt      observed forward result
+      full_result_sample_N.pt           complete native result object
+      full_result_sample_N.npz/.json    portable arrays plus JSON structure
+      *_inventory.json                  path, shape, dtype, finiteness per tensor
+    native/                per sample N (one-based)
+      <rid>_sample_N.cif                native writer output
+      confidence_<rid>_sample_N.json    pLDDT/PAE summary scalars, per-residue pLDDT, chain mapping
+      pae_<rid>_sample_N.npz            native PAE matrix
+      plddt_<rid>_sample_N.npz          native per-token pLDDT
+      embeddings_<rid>_sample_N.npz     sequence/pair pooled embeddings
     benchmark_metrics.json allocator peaks, stage timings for this job
-    model_parameters_before.json / model_parameters_after.json
+    benchmark_failure.json allocator/load context written by the native boundary on failure
 ```
 
 `predictions.jsonl` keeps the Boltz schema: `job_key`, `input`, `seed`, `sample_index`,
 `seed_occurrence`, `status`, `verified`, `error_kind`, `output`, `metrics`, `metrics_scope`.
-`metrics_scope` is `input_seed_sample_not_batch`, because each sample is its own native call.
+`metrics_scope` is `input_seed_batch_not_individual_sample`, the single value both containers emit.
 
 ## 6. Identity, resume and receipts
 
@@ -136,8 +142,9 @@ OUTPUT/
 - A completed job writes `receipt.json` with the sha256 inventory of the whole attempt;
   `--resume` reuses it only when the identity matches and every hash still matches.
 - Interrupted attempts stay in place; a resumed job gets a new attempt directory.
-- Exit codes: 0 all requested jobs completed or reused, 1 failure/fatal, 143 stopped at a job
-  boundary.
+- Exit codes: 0 all requested jobs completed or reused, 1 failure/fatal, 2 rejected before any job,
+  124 whole-run timeout, 143 stopped at a job boundary, 137 killed. `run.json.status` is
+  authoritative; `termination.json` records a launcher kill or signal.
 
 ## 7. Verification
 
@@ -160,6 +167,8 @@ Independent reader checks on every completed job, without trusting the engine's 
   explicit unavailable reasons.
 - `errors.py`: CUDA OOM classification across the whole engine call scope, per-system skip after
   an OOM, continue with independent systems without reloading the model.
+- `failure.json` per failed attempt (redacted, receipt-referenced diagnosis) and `--job-timeout`,
+  which records `error_kind: 'timeout'` at a sample/job boundary and continues with later jobs.
 - `throughput_benchmark.py`: fixed-budget sweeps and five-host aggregation. Defaults follow the
   engine: `--steps 200`, `--recycles 20`, `--levels 1`, `--samples 1`. Because this engine cannot
   batch samples, only `--levels 1` is meaningful; both the sweep and the worker reject any other

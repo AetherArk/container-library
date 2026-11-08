@@ -56,3 +56,22 @@
   the raw forward tensors; it still checks structure geometry against the saved coordinates, the
   confidence scalars, the PAE/PDE/pLDDT pairing, the embeddings, the rank bijection and the exact
   native file inventory.
+
+## Observability contract acceptance (RTX 5070 Ti, local image)
+
+Image `container-library/boltz2:obs-smoke` built from this branch, run through `run_cofold.py` on
+GPU 1 with Trp-cage/ethanol, seed 11, one sample, three recycles, 200 steps, `--no-kernels`:
+
+- Two inputs in one invocation: the valid one `completed`, the deliberately malformed YAML failed
+  with `error_kind: native_error`, one checkpoint load for the whole run.
+- The failed attempt wrote `failure.json` with the real diagnosis (YAML `ScannerError`, message and
+  line/column, 35-line traceback tail) and its `receipt.json` carries `failure: 'failure.json'`.
+- `run.json`, `progress.json` and both `receipt.json` carry `schema: 1`; `progress.json` carries
+  `pid` and `updated_at_unix`.
+- `--timeout 8` on the same input returned exit `124` and wrote `termination.json`
+  (`reason: timeout`, container id present, `last_progress` showing the last counters).
+- `--job-timeout 2` returned exit `1` with the job failed as `error_kind: timeout`, a `failure.json`
+  reading `job exceeded --job-timeout of 2 seconds`, and no `termination.json`.
+
+CPU: 131 tests pass, 2 skipped, including the new failure-redaction, liveness, schema, OOM-double and
+launcher tests.
