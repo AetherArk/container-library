@@ -1,0 +1,4 @@
+#!/opt/venv/bin/python
+from cloud_job import main
+
+raise SystemExit(main())
