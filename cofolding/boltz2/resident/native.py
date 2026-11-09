@@ -14,6 +14,8 @@ from .errors import native_boundary
 import numpy as np
 import torch
 import yaml
+from cofolding.common import derived
+
 from pytorch_lightning import seed_everything
 import boltz.main as native
 from boltz.data import const
@@ -96,6 +98,138 @@ def save_summary(directory, saved):
             'complex_plddt', 'complex_iplddt', 'complex_pde', 'complex_ipde')
     fields = {key: saved[key] for key in keep if key in saved}
     torch.save(fields, directory / 'prediction_summary.pt')
+
+
+#: Single-atom NONPOLYMER CCD tokens treated as ions rather than ligands.
+ION_TOKENS = frozenset(('NA', 'CL', 'K', 'MG', 'CA', 'ZN', 'MN', 'FE', 'CU', 'CO',
+                        'NI', 'CD', 'HG', 'BR', 'IOD', 'F', 'LI', 'CS', 'SR', 'BA'))
+ENTITY_KINDS = {'protein': 'protein', 'dna': 'dna', 'rna': 'rna',
+                'ligand': 'ligand', 'ccd': 'ligand'}
+
+
+def _atom_name(chars):
+    """Decode one ``ref_atom_name_chars`` one-hot row into its ASCII atom name."""
+    values = np.asarray(chars).argmax(axis=-1)
+    return ''.join(chr(int(c) + 32) for c in values).strip()
+
+
+def token_map(batch, data):
+    """One entry per PAE token, derived from the collated batch and the input YAML.
+
+    The PAE matrix has one row per token, so a token map that cannot place a
+    token is refused with :class:`derived.TokenMapError` rather than guessed.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get('sequences'), list):
+        raise derived.TokenMapError('input YAML has no sequences list')
+    entities = []
+    for entity in data['sequences']:
+        if not isinstance(entity, dict) or len(entity) != 1:
+            raise derived.TokenMapError('each YAML entity must have exactly one type key')
+        kind, entry = next(iter(entity.items()))
+        if kind not in ENTITY_KINDS:
+            raise derived.TokenMapError('unsupported entity type %r in token map' % (kind,))
+        if not isinstance(entry, dict) or not isinstance(entry.get('id'), str):
+            raise derived.TokenMapError('YAML entity has no string id')
+        entities.append((entry['id'], kind, entry))
+
+    mask = batch['token_pad_mask'][0].bool()
+    n_tokens = int(mask.sum())
+    if n_tokens < 1:
+        raise derived.TokenMapError('collated batch has no unmasked tokens')
+    for key in ('mol_type', 'asym_id', 'residue_index',
+                'token_to_rep_atom', 'ref_atom_name_chars'):
+        if key not in batch:
+            raise derived.TokenMapError('collated batch is missing %r' % (key,))
+    mol_type = batch['mol_type'][0][mask].tolist()
+    asym = batch['asym_id'][0][mask].tolist()
+    residue_index = batch['residue_index'][0][mask].tolist()
+    rep_atoms = batch['token_to_rep_atom'][0][mask].argmax(dim=-1).tolist()
+    name_chars = batch['ref_atom_name_chars'][0]
+
+    chains = list(dict.fromkeys(asym))
+    if len(chains) != len(entities):
+        raise derived.TokenMapError(
+            'batch has %d chains but the input YAML declares %d entities'
+            % (len(chains), len(entities)))
+    chain_ids = {}
+    for chain, (entity_id, kind, entry) in zip(chains, entities):
+        chain_ids[chain] = entity_id
+        members = [i for i, value in enumerate(asym) if value == chain]
+        polymer = kind in ('protein', 'dna', 'rna')
+        if polymer:
+            sequence = entry.get('sequence')
+            if not isinstance(sequence, str):
+                raise derived.TokenMapError(
+                    'chain %r is %s but has no sequence string' % (entity_id, kind))
+            if len(members) != len(sequence):
+                raise derived.TokenMapError(
+                    'chain %r has %d tokens for a %d-residue input'
+                    % (entity_id, len(members), len(sequence)))
+            indices = [residue_index[i] for i in members]
+            if indices != list(range(indices[0], indices[0] + len(members))):
+                raise derived.TokenMapError(
+                    'chain %r residue indices are not consecutive: %r'
+                    % (entity_id, indices))
+
+    tokens = []
+    for index in range(n_tokens):
+        chain = chain_ids[asym[index]]
+        mtype = mol_type[index]
+        if mtype in (0, 1, 2):
+            kind = ('protein', 'dna', 'rna')[mtype]
+            tokens.append({'index': index, 'kind': kind, 'chain': chain,
+                           'residue_index': int(residue_index[index])})
+        elif mtype == 3:
+            atom_name = _atom_name(name_chars[rep_atoms[index]])
+            atom_index = sum(1 for token in tokens
+                             if token['chain'] == chain and token['kind'] in ('ligand', 'ion'))
+            tokens.append({'index': index, 'kind': 'ligand', 'chain': chain,
+                           'atom_name': atom_name, 'atom_index': atom_index})
+        else:
+            raise derived.TokenMapError(
+                'token %d has unsupported mol_type %r' % (index, mtype))
+    # A single nonpolymer atom whose name is an element symbol is an ion.  This
+    # is read from the token's own atom name, not from a guessed chain name.
+    counts = {}
+    for token in tokens:
+        if token['kind'] in ('ligand', 'ion'):
+            counts[token['chain']] = counts.get(token['chain'], 0) + 1
+    for token in tokens:
+        if (token['kind'] == 'ligand' and counts.get(token['chain']) == 1
+                and token['atom_name'] in ION_TOKENS):
+            token['kind'] = 'ion'
+    return {'schema': 1, 'engine': 'boltz2', 'n_tokens': n_tokens,
+            'pae_index': 'row/column index of the token in the PAE matrix',
+            'chains': [{'id': chain_ids[chain],
+                        'kind': next(k for c, (i, k, e) in zip(chains, entities)
+                                     if c == chain),
+                        'tokens': sum(1 for value in asym if value == chain)}
+                       for chain in chains],
+            'tokens': tokens}
+
+
+def save_token_map(attempt, token_map_obj, capture=None):
+    """Write the token map beside the attempt, and into capture/ when it exists."""
+    atomic_json(Path(attempt) / 'tokens.json', token_map_obj)
+    written = [Path(attempt) / 'tokens.json']
+    if capture is not None:
+        atomic_json(Path(capture) / 'tokens.json', token_map_obj)
+        written.append(Path(capture) / 'tokens.json')
+    return written
+
+
+def _sample_pae(attempt):
+    """Load the PAE matrix written by this job: capture packet first, then summary."""
+    packet = Path(attempt) / 'capture' / 'full_prediction.pt'
+    if packet.is_file():
+        payload = torch.load(packet, map_location='cpu', weights_only=False)
+        return payload['pae'], 'capture/full_prediction.pt'
+    summary = Path(attempt) / 'prediction_summary.pt'
+    if summary.is_file():
+        payload = torch.load(summary, map_location='cpu', weights_only=False)
+        return payload['pae'], 'prediction_summary.pt'
+    return None, None
+
 
 
 class NativeEngine:
@@ -233,6 +367,16 @@ class NativeEngine:
         capture = attempt / 'capture' if self.settings.capture == 'full' else None
         if capture is not None:
             capture.mkdir()
+        # Token map: derived from the collated batch while it is still the engine's
+        # own object, not inferred later from array shapes.
+        self.token_map_paths = []
+        self.token_map_error = None
+        try:
+            save_token_map(attempt, token_map(prepared['batch'], prepared['data']),
+                           capture)
+            self.token_map_paths = ['tokens.json']
+        except derived.TokenMapError as exc:
+            self.token_map_error = str(exc)
         begin = time.perf_counter()
         atomic_json(attempt / 'resolved_model_args.json', self.load_args)
         # Full per-parameter device/pointer evidence once per job; compact hashes
@@ -310,6 +454,46 @@ class NativeEngine:
             prepared['batch'] = None
             del batch
             gc.collect()
+
+    @native_boundary
+    def derive(self, prepared, attempt):
+        """Compute ipSAE family metrics from the written PAE, before capture can be dropped."""
+        attempt = Path(attempt)
+        pae, source = _sample_pae(attempt)
+        predictions = []
+        tokens = None
+        token_error = getattr(self, 'token_map_error', None)
+        if token_error is None and (attempt / 'tokens.json').is_file():
+            try:
+                tokens = derived.read_token_map(attempt / 'tokens.json')
+            except derived.TokenMapError as exc:
+                token_error = str(exc)
+        elif token_error is None:
+            token_error = 'tokens.json was not written for this attempt'
+        arrays = [None]
+        pae_error = None
+        if pae is not None:
+            array = np.asarray(pae)
+            if array.ndim == 3:
+                arrays = [np.asarray(array[index]) for index in range(array.shape[0])]
+            elif array.ndim == 2:
+                arrays = [array]
+            else:
+                pae_error = 'PAE has unexpected shape %r' % (array.shape,)
+        elif source is None:
+            pae_error = 'no PAE packet (capture/full_prediction.pt or prediction_summary.pt) was written'
+        for index, one in enumerate(arrays):
+            reason = token_error or pae_error
+            pairs = None
+            if reason is None:
+                pairs, reason = derived.score(one, tokens)
+            predictions.append({'sample_index': index,
+                                'sample_seed': None,
+                                'pae': source if one is not None else None,
+                                'token_map': 'tokens.json' if tokens is not None else None,
+                                'pairs': pairs,
+                                'derived_null_reason': reason})
+        return derived.write_derived(attempt, predictions)
 
     @native_boundary
     def verify(self, prepared, attempt):

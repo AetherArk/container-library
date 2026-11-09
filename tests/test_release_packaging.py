@@ -20,6 +20,14 @@ class ReleasePackagingTests(unittest.TestCase):
                 self.assertIn(path, data['on'][event]['paths'])
         self.assertIn('python scripts/test_local.py --suite cpu', [s.get('run') for s in data['jobs']['test']['steps']])
 
+    def test_publish_workflows_supply_the_shared_common_build_context(self):
+        # Both Dockerfiles COPY --from=common, so a workflow that omits the named
+        # context fails at build time rather than at review time.
+        for name in ('boltz2-publish.yml', 'esmfold2-publish.yml'):
+            text = (Path(__file__).resolve().parents[1] / '.github/workflows' / name).read_text()
+            self.assertIn('--build-context common=cofolding/common', text, name)
+            self.assertIn('docker buildx build', text, name)
+
     def test_publication_is_manual_and_uses_scoped_workflow_token(self):
         data = workflow('boltz2-publish.yml')
         self.assertEqual(set(data['on']), {'workflow_dispatch'})

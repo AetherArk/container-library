@@ -45,6 +45,10 @@ def parser():
     p.add_argument('--output-format', choices=('mmcif', 'pdb'))
     p.add_argument('--capture', choices=('full', 'none'),
                    help="'none' omits the per-job capture/ tensors; forward this to cofold-run")
+    p.add_argument('--derived', choices=('none', 'tensors'),
+                   help="'tensors' (default inside the worker) computes ipSAE-family interface "
+                        "scores from the PAE and writes metrics/derived.json; 'none' writes no "
+                        "derived metrics and records why. Works with --capture none.")
     return p
 
 
@@ -127,7 +131,7 @@ def command(a, image, token):
     if a.benchmark_metadata is not None:
         cmd += ['--benchmark-metadata', '/inputs/' + a.benchmark_metadata.relative_to(a.inputs).as_posix()]
     for name in ('samples', 'recycles', 'steps', 'max_parallel_samples', 'no_kernels',
-                 'use_potentials', 'output_format', 'capture', 'resume'):
+                 'use_potentials', 'output_format', 'capture', 'derived', 'resume'):
         value = getattr(a, name)
         if value is not None and value is not False:
             cmd.append('--' + name.replace('_', '-'))

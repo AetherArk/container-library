@@ -29,6 +29,7 @@ class Settings:
     backend: str = 'fused'
     max_parallel_samples: int = 1
     output_format: str = 'mmcif'
+    derived: str = 'tensors'
 
 
 @dataclass
@@ -179,6 +180,8 @@ def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
     if settings.output_format != 'mmcif':
         raise ValueError('ESMFold2 writes mmCIF only; output_format must be mmcif (cif was removed: '
                          'it duplicated mmcif and the launcher never offered it)')
+    if settings.derived not in ('tensors', 'none'):
+        raise ValueError("derived must be 'tensors' or 'none'")
     if any(seed * 1000 + settings.samples - 1 > 2147483647 for seed in seeds):
         raise ValueError('seed mapping exceeds the engine signed 32-bit range')
     if job_timeout is not None and not (job_timeout > 0 and job_timeout != float('inf')):
@@ -269,6 +272,8 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 'phase': job.get('phase'),
                 'model_was_loaded_before_cell': job.get('model_was_loaded_before_cell'),
                 'output': job['output'], 'metrics_scope': 'input_seed_batch_not_individual_sample',
+                'derived': job.get('derived'),
+                'derived_null_reason': job.get('derived_null_reason'),
                 'metrics': job.get('benchmark_metrics'),
                 'metrics_null_reason': ('reused_not_measured' if job['reused'] else 'native_metrics_unavailable')
                     if not job.get('benchmark_metrics') else None})
@@ -407,10 +412,25 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 job['model_after'] = engine.snapshot()
                 if job['model_before'] != job['model_after']:
                     raise RuntimeError('resident model identity/device/storage changed')
+                if settings.derived == 'tensors':
+                    if hasattr(engine, 'derive'):
+                        with benchmark.stage('derived_metrics', job_key=job['key']):
+                            derived_info = engine.derive(prepared, attempt)
+                        job['derived'] = derived_info.get('path')
+                        job['derived_null_reason'] = derived_info.get('null_reason')
+                    else:
+                        job['derived'] = None
+                        job['derived_null_reason'] = (
+                            'engine does not implement derived metrics; nothing was written')
+                else:
+                    job['derived'] = None
+                    job['derived_null_reason'] = 'disabled_by_--derived_none'
                 job['status'] = 'completed'
                 with benchmark.stage('receipt_verification_and_write', job_key=job['key']):
                     atomic_json(attempt / 'receipt.json', {'schema': SCHEMA, 'status': 'completed',
                                                            'identity': job['identity'],
+                                                           'derived': job.get('derived'),
+                                                           'derived_null_reason': job.get('derived_null_reason'),
                                                            'sha256': inventory(attempt)})
                 counts['completed'] += 1
             except Exception as exc:
@@ -482,6 +502,10 @@ def parser():
     p.add_argument('--max-parallel-samples', type=int, default=1)
     p.add_argument('--output-format', choices=('mmcif',), default='mmcif',
                    help='ESMFold2 writes mmCIF only; pdb is refused rather than ignored')
+    p.add_argument('--derived', choices=('none', 'tensors'), default='tensors',
+                   help="'tensors' (default) computes ipSAE-family interface scores from each " 
+                        "sample's PAE and writes metrics/derived.json; 'none' writes no derived "
+                        "metrics and records why")
     p.add_argument('--resume', action='store_true')
     p.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
     p.add_argument('--job-timeout', type=float,

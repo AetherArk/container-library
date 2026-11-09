@@ -29,6 +29,9 @@ COPY resident /opt/cofold/resident
 COPY batch_native /opt/cofold/batch_native
 COPY cloud_job.py fetch_assets.py assets.json /opt/cofold/
 COPY cofold-cloud-run /opt/cofold/cofold-cloud-run
+# Dependency-light shared helpers (numpy only) used for derived metrics.
+# Build with --build-context common=cofolding/common.
+COPY --from=common . /opt/cofold/cofolding/common
 RUN chmod 755 /opt/cofold/cofold-cloud-run \
  && ln -s /opt/cofold/cofold-cloud-run /opt/venv/bin/cofold-cloud-run
 RUN chmod 755 /opt/cofold/resident/cofold-run \

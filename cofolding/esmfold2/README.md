@@ -26,7 +26,7 @@
 
 - Clone: `git clone https://github.com/AetherArk/container-library.git`; enter `container-library`.
 - Host environment: `python3 -m venv .venv && .venv/bin/pip install -r cofolding/boltz2/requirements-host.txt` (the launcher is shared).
-- Build: `docker build --build-arg CONTAINER_REVISION="$(git rev-parse HEAD)" -t container-library/esmfold2:3.4.1.post1-worker-rc1 cofolding/esmfold2`.
+- Build: `docker build --build-context common=cofolding/common --build-arg CONTAINER_REVISION="$(git rev-parse HEAD)" -t container-library/esmfold2:3.4.1.post1-worker-rc1 cofolding/esmfold2`. The named `common` context installs `cofolding/common` at `/opt/cofold/cofolding/common` so the worker can import the shared numpy-only interface-scoring module.
 - Assets: `.venv/bin/python cofolding/esmfold2/fetch_assets.py --assets /path/to/cache --download`.
 - Download is about 26.7 GB including weights and `ccd.pkl`; inference itself is offline.
 

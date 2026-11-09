@@ -21,6 +21,7 @@ import inspect
 import numpy as np
 import torch
 import yaml
+from cofolding.common import derived
 
 from .identity import directory_identity
 from .worker import atomic_json
@@ -179,6 +180,115 @@ def portable(value, arrays, path='result'):
     return value
 
 
+def web_complex_chain_groups(complex_obj):
+    """Consecutive complex-token ranges per chain, in the result's own order."""
+    groups = []
+    for index, asym in enumerate(np.asarray(complex_obj.chain_id).tolist()):
+        if not groups or groups[-1][0] != asym:
+            groups.append((asym, [index]))
+        else:
+            groups[-1][1].append(index)
+    return groups
+
+
+def token_map(prepared, result):
+    """One entry per PAE token, derived from the constructed inputs and the result.
+
+    ESMFold2's PAE has one row per atom-expanded token: one token per protein
+    residue and one token per ligand heavy atom.  The returned complex collapses
+    ligand atoms into a single residue token, so atom names and the heavy-atom
+    order come from the complex while the PAE positions come from the input
+    sizes.  Any mismatch is refused instead of guessed.
+    """
+    pae = getattr(result, 'pae', None)
+    if pae is None:
+        raise derived.TokenMapError('result carries no PAE matrix')
+    n_pae = int(np.asarray(pae).shape[0])
+    complex_obj = result.complex
+    groups = web_complex_chain_groups(complex_obj)
+    lookup = complex_obj.metadata.chain_lookup
+    inputs = list(prepared['input'].sequences)
+    if len(groups) != len(inputs):
+        raise derived.TokenMapError(
+            'result has %d chains but %d inputs were constructed'
+            % (len(groups), len(inputs)))
+
+    tokens = []
+    chains = []
+    entity_ids = None
+    if getattr(result, 'entity_id', None) is not None:
+        entity_ids = np.asarray(result.entity_id).tolist()
+        if len(entity_ids) != n_pae:
+            raise derived.TokenMapError(
+                'result.entity_id has %d entries for %d PAE tokens'
+                % (len(entity_ids), n_pae))
+    for position, (group, entry) in enumerate(zip(groups, inputs)):
+        asym, complex_idxs = group
+        chain_id = lookup.get(asym)
+        if not isinstance(chain_id, str) or not chain_id:
+            raise derived.TokenMapError('complex chain %r has no chain id' % (asym,))
+        kind_name = type(entry).__name__
+        if kind_name == 'ProteinInput':
+            sequence = entry.sequence
+            if len(complex_idxs) != len(sequence):
+                raise derived.TokenMapError(
+                    'chain %r has %d complex residues for a %d-residue input'
+                    % (chain_id, len(complex_idxs), len(sequence)))
+            for residue in range(len(sequence)):
+                tokens.append({'index': len(tokens), 'kind': 'protein',
+                               'chain': chain_id, 'residue_index': residue})
+            chains.append({'id': chain_id, 'kind': 'protein',
+                           'units': len(sequence)})
+            continue
+        if kind_name != 'LigandInput':
+            raise derived.TokenMapError(
+                'chain %r is %s; only protein and ligand inputs are supported'
+                % (chain_id, kind_name))
+        if len(complex_idxs) != 1:
+            raise derived.TokenMapError(
+                'ligand chain %r collapsed into %d complex tokens, expected 1'
+                % (chain_id, len(complex_idxs)))
+        start, end = (int(v) for v in complex_obj.token_to_atoms[complex_idxs[0]])
+        names = list(complex_obj.atom_names[start:end]) if complex_obj.atom_names is not None else []
+        elements = list(complex_obj.atom_elements[start:end])
+        if end - start < 1:
+            raise derived.TokenMapError('ligand chain %r has no atoms' % (chain_id,))
+        if len(names) != end - start:
+            raise derived.TokenMapError(
+                'ligand chain %r has %d atom names for %d atoms'
+                % (chain_id, len(names), end - start))
+        kind = 'ion' if end - start == 1 else 'ligand'
+        for atom_index in range(end - start):
+            name = str(names[atom_index] or elements[atom_index])
+            tokens.append({'index': len(tokens), 'kind': kind, 'chain': chain_id,
+                           'atom_name': name, 'atom_index': atom_index,
+                           'element': str(elements[atom_index])})
+        chains.append({'id': chain_id, 'kind': kind, 'units': end - start})
+
+    if len(tokens) != n_pae:
+        raise derived.TokenMapError(
+            'constructed inputs place %d tokens but the PAE matrix has %d rows'
+            % (len(tokens), n_pae))
+    if entity_ids is not None:
+        cursor = 0
+        for chain in chains:
+            block = entity_ids[cursor:cursor + chain['units']]
+            cursor += chain['units']
+            if not block or len(set(block)) != 1:
+                raise derived.TokenMapError(
+                    'result.entity_id does not keep chain %r contiguous' % (chain['id'],))
+    return {'schema': 1, 'engine': 'esmfold2', 'n_tokens': n_pae,
+            'pae_index': 'row/column index of the atom-expanded token in the PAE matrix',
+            'token_layout': 'one token per protein residue, one per ligand heavy atom',
+            'chains': chains, 'tokens': tokens}
+
+
+def save_token_map(native, rid, sample_index, token_map_obj):
+    name = 'tokens_' + rid + '_sample_' + str(sample_index) + '.json'
+    atomic_json(Path(native) / name, token_map_obj)
+    return name
+
+
 class ESMFold2Engine:
     def __init__(self, assets, checkpoint, settings):
         self.assets, self.checkpoint, self.settings = Path(assets), Path(checkpoint), settings
@@ -222,7 +332,8 @@ class ESMFold2Engine:
             'settings': {'samples': self.settings.samples, 'num_loops': self.settings.loops,
                          'num_sampling_steps': self.settings.steps, 'backend': self.settings.backend,
                          'max_parallel_samples': self.settings.max_parallel_samples,
-                         'output_format': self.settings.output_format},
+                         'output_format': self.settings.output_format,
+                         'derived': self.settings.derived},
             'base_seed': seed, 'sample_seeds': sample_seeds,
             'seed_formula': 'base_seed*1000 + zero_based_sample_index',
             'num_diffusion_samples_per_call': 1, 'msa': False, 'templates': False,
@@ -308,6 +419,8 @@ class ESMFold2Engine:
         metrics['allocator_baseline_bytes'] = {'allocated': torch.cuda.memory_allocated(),
                                                'reserved': torch.cuda.memory_reserved()}
         self.benchmark_metrics = metrics
+        self.token_map_files = {}
+        self.token_map_errors = {}
         rid = prepared['rid']
         for index, sample_seed in enumerate(prepared['sample_seeds']):
             check = self.sample_deadline
@@ -378,6 +491,13 @@ class ESMFold2Engine:
                 'plddt_scope': 'native_atom_expanded_token',
                 'chains': prepared['entities'],
                 'pae_shape': list(np.asarray(result.pae).shape)})
+            # Token map: derived from the constructed inputs and this result, never
+            # from the PAE shape alone.  A placement failure is recorded, not guessed.
+            try:
+                name = save_token_map(native, rid, index + 1, token_map(prepared, result))
+                self.token_map_files[index] = name
+            except derived.TokenMapError as exc:
+                self.token_map_errors[index] = str(exc)
             save_packet(capture, 'prepared_features_sample_' + str(index + 1),
                         observed.get('prepared_features'))
             save_packet(capture, 'raw_model_output_sample_' + str(index + 1), observed.get('raw'))
@@ -389,6 +509,47 @@ class ESMFold2Engine:
         metrics['allocator_peak_bytes'] = {'allocated': torch.cuda.max_memory_allocated(),
                                            'reserved': torch.cuda.max_memory_reserved()}
         atomic_json(attempt / 'benchmark_metrics.json', metrics)
+
+    # -- derived interface metrics -----------------------------------------------------
+    @native_boundary
+    def derive(self, prepared, attempt):
+        """Score every written sample's PAE against its token map."""
+        attempt = Path(attempt)
+        native = attempt / 'native'
+        rid = prepared['rid']
+        predictions = []
+        for index, sample_seed in enumerate(prepared['sample_seeds']):
+            number = index + 1
+            pae_path = native / ('pae_' + rid + '_sample_' + str(number) + '.npz')
+            map_name = getattr(self, 'token_map_files', {}).get(index)
+            reason = getattr(self, 'token_map_errors', {}).get(index)
+            pae = None
+            tokens = None
+            try:
+                with np.load(pae_path, allow_pickle=False) as arrays:
+                    pae = np.asarray(arrays['pae'], dtype=float)
+            except (OSError, ValueError, KeyError) as exc:
+                reason = reason or 'PAE array is unreadable: %s (%s)' % (pae_path, exc)
+            if reason is None:
+                if not map_name:
+                    reason = 'token map was not written for this sample'
+                else:
+                    try:
+                        tokens = derived.read_token_map(native / map_name)
+                    except derived.TokenMapError as exc:
+                        reason = str(exc)
+            pairs = None
+            if reason is None:
+                pairs, reason = derived.score(pae, tokens)
+            predictions.append({
+                'sample_index': index,
+                'sample_seed': sample_seed,
+                'pae': ('native/' + pae_path.name) if pae is not None else None,
+                'token_map': ('native/' + map_name) if (tokens is not None and map_name) else None,
+                'pairs': pairs,
+                'derived_null_reason': reason,
+            })
+        return derived.write_derived(attempt, predictions)
 
     # -- verification ------------------------------------------------------------------
     @native_boundary

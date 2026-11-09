@@ -236,6 +236,8 @@ def validate_settings(seeds, settings):
         raise ValueError('invalid boolean settings')
     if settings['output_format'] not in ('mmcif', 'pdb'):
         raise ValueError('invalid output format')
+    if settings['derived'] not in ('none', 'tensors'):
+        raise ValueError('invalid derived-metrics mode')
 
 
 def safe_name(name):

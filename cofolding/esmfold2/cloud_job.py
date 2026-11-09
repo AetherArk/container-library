@@ -238,6 +238,8 @@ def validate_settings(seeds, settings):
         raise ValueError('invalid kernel backend')
     if settings['output_format'] != 'mmcif':
         raise ValueError('this engine writes mmCIF only')
+    if settings['derived'] not in ('none', 'tensors'):
+        raise ValueError('invalid derived-metrics mode')
 
 
 def safe_name(name):
@@ -421,7 +423,8 @@ def child_environment(runtime, image):
 
 
 WORKER_FLAGS = {'samples': '--samples', 'steps': '--steps', 'loops': '--recycles',
-                'max_parallel_samples': '--max-parallel-samples', 'output_format': '--output-format'}
+                'max_parallel_samples': '--max-parallel-samples', 'output_format': '--output-format',
+                'derived': '--derived'}
 
 
 def worker_command(job, inputs, outputs, assets, checkpoint):

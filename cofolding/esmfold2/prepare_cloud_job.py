@@ -228,6 +228,8 @@ def parser():
         elif key == 'backend':
             p.add_argument(flag, choices=('fused', 'reference'), default=value,
                            help='kernel backend; --no-kernels in cofold-run means reference')
+        elif key == 'derived':
+            p.add_argument(flag, choices=('none', 'tensors'), default=value)
         else:
             p.add_argument(flag, choices=('mmcif',), default=value)
     return p

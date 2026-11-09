@@ -541,6 +541,7 @@ class ArchiveTests(unittest.TestCase):
     def test_asset_downloader_and_native_defaults_are_packaged_without_default_override(self):
         docker = (ROOT/'cofolding/boltz2/Dockerfile').read_text()
         self.assertIn('COPY cloud_job.py fetch_assets.py assets.json /opt/cofold/', docker)
+        self.assertIn('COPY --from=common . /opt/cofold/cofolding/common', docker)
         self.assertIn('ENTRYPOINT ["cofold-run"]', docker)
         self.assertIn('CMD ["--help"]', docker)
         ignore = (ROOT/'cofolding/boltz2/.dockerignore').read_text().splitlines()
