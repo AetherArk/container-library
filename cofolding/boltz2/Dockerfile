@@ -40,6 +40,10 @@ RUN groupadd --gid 1000 boltz \
  && chown -R boltz:boltz /workspace /work
 ENV BOLTZ_CACHE=/workspace/cache TRITON_CACHE_DIR=/workspace/cache/triton \
     HF_HOME=/workspace/cache/hf XDG_CACHE_HOME=/workspace/cache
+# Image identity: the OCI label is the source of truth; the JSON mirror lets the
+# worker inside the container read it without a Docker socket.
+ARG CONTAINER_IMAGE_ID=unknown
+RUN printf '{"image_id": "%s"}\n' "$CONTAINER_IMAGE_ID" > /opt/cofold/image-label.json
 USER boltz
 WORKDIR /work
 ENTRYPOINT ["cofold-run"]
@@ -54,4 +58,5 @@ LABEL org.opencontainers.image.title="Boltz2" \
       org.opencontainers.image.description="Boltz 2.2.1; Python 3.11; PyTorch 2.7.1/cu128; external model assets" \
       org.opencontainers.image.vendor="AetherArk" \
       ai.aetherark.boltz.source="https://github.com/jwohlwend/boltz" \
-      ai.aetherark.boltz.revision="cb04aeccdd480fd4db707f0bbafde538397fa2ac"
+      ai.aetherark.boltz.revision="cb04aeccdd480fd4db707f0bbafde538397fa2ac" \
+      ai.aetherark.cofold.image_id="${CONTAINER_IMAGE_ID}"

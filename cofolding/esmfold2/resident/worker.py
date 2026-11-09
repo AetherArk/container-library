@@ -16,6 +16,10 @@ import uuid
 from .benchmark import Benchmark, SCHEMA, load_metadata, error_label, write_failure
 from .errors import is_cuda_oom, release_exception
 
+# Mirror of the image label ai.aetherark.cofold.image_id, written by the Dockerfile
+# from CONTAINER_IMAGE_ID so the worker can read its own image identity.
+IMAGE_LABEL = Path('/opt/cofold/image-label.json')
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -112,14 +116,42 @@ def inventory(attempt):
             if p.is_file() and p.name != 'receipt.json'}
 
 
+def image_identity():
+    """Identify the installed image: baked label first, launcher env second.
+
+    A direct `docker run` (no launcher env, no label) records an explicit null and
+    the reason instead of a bare null.
+    """
+    label = None
+    try:
+        data = json.loads(IMAGE_LABEL.read_text())
+        candidate = data.get('image_id') if isinstance(data, dict) else None
+        if isinstance(candidate, str) and candidate and candidate != 'unknown':
+            label = candidate
+    except (OSError, ValueError):
+        pass
+    if label is not None:
+        return {'image_id': label, 'image_id_source': 'image_label'}
+    env = os.environ.get('COFOLD_IMAGE_ID')
+    if isinstance(env, str) and env:
+        return {'image_id': env, 'image_id_source': 'env'}
+    return {'image_id': None, 'image_id_source': None,
+            'image_id_reason': 'no image label and COFOLD_IMAGE_ID unset (direct docker run)'}
+
+
 def completed(output, key, identity):
+    """Reuse requires every recorded path to still hash-match; extra files are tolerated."""
     for receipt in sorted((output / 'jobs' / key).glob('*/receipt.json'), reverse=True):
         try:
             saved = json.loads(receipt.read_text())
             if saved['status'] != 'completed' or saved['identity'] != identity:
                 continue
-            if saved['sha256'] and inventory(receipt.parent) == saved['sha256']:
-                return receipt.parent
+            recorded = saved['sha256'] or {}
+            if not recorded:
+                continue
+            actual = inventory(receipt.parent)
+            if all(actual.get(path) == digest for path, digest in recorded.items()):
+                return receipt.parent, len(set(actual) - set(recorded))
         except (OSError, ValueError, KeyError):
             continue
     return None
@@ -144,8 +176,9 @@ def run(inputs, output, assets, checkpoint, seeds, settings, resume=False,
         raise ValueError('ESMFold2 samples one trajectory per native call; --max-parallel-samples must be 1')
     if settings.backend not in ('fused', 'reference'):
         raise ValueError('backend must be fused or reference')
-    if settings.output_format not in ('mmcif', 'cif'):
-        raise ValueError('ESMFold2 writes mmCIF; output_format must be mmcif or cif')
+    if settings.output_format != 'mmcif':
+        raise ValueError('ESMFold2 writes mmCIF only; output_format must be mmcif (cif was removed: '
+                         'it duplicated mmcif and the launcher never offered it)')
     if any(seed * 1000 + settings.samples - 1 > 2147483647 for seed in seeds):
         raise ValueError('seed mapping exceeds the engine signed 32-bit range')
     if job_timeout is not None and not (job_timeout > 0 and job_timeout != float('inf')):
@@ -194,10 +227,9 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
         checkpoint_hash = checkpoint_identity['sha256']
         assets_identity = ({'kind': 'checkpoint_directory', 'sha256': checkpoint_hash}
                            if assets.resolve() == checkpoint.resolve() else asset_identity(assets))
-    implementation = {'image_id': os.environ.get('COFOLD_IMAGE_ID'),
-                      'code': {str(p.relative_to(Path(__file__).parent.parent)): sha(p)
-                               for folder in ('resident', 'batch_native')
-                               for p in sorted((Path(__file__).parent.parent / folder).glob('*.py'))}}
+    implementation = dict(image_identity(), code={str(p.relative_to(Path(__file__).parent.parent)): sha(p)
+                                                  for folder in ('resident', 'batch_native')
+                                                  for p in sorted((Path(__file__).parent.parent / folder).glob('*.py'))})
     jobs = []
     for source in sources:
         source_identity = input_identity(source)
@@ -262,7 +294,9 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
             if other['input'] == job['input'] and other['status'] == 'pending':
                 prior = completed(output, other['key'], other['identity']) if resume else None
                 if prior is not None:
-                    other.update(status='completed', output=str(prior.relative_to(output)), reused=True)
+                    attempt_dir, extras = prior
+                    other.update(status='completed', output=str(attempt_dir.relative_to(output)),
+                                 reused=True, inventory_extras=extras)
                     counts['completed'] += 1
                 else:
                     other.update(status='skipped', error_kind='cuda_out_of_memory',
@@ -289,7 +323,9 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
             with benchmark.stage('resume_verification', job_key=job['key']):
                 prior = completed(output, job['key'], job['identity']) if resume else None
             if prior is not None:
-                job.update(status='completed', output=str(prior.relative_to(output)), reused=True)
+                attempt_dir, extras = prior
+                job.update(status='completed', output=str(attempt_dir.relative_to(output)),
+                           reused=True, inventory_extras=extras)
                 counts['completed'] += 1
                 save()
                 continue
@@ -430,34 +466,41 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
     return 143 if meta['status'] == 'stopped' else (0 if meta['status'] == 'completed' else 1)
 
 
-def main():
-    parser = argparse.ArgumentParser(description='One resident ESMFold2 model for native YAML inputs × explicit seeds')
+def parser():
+    """The installed worker CLI; shared flags are checked against cofolding/cli-contract.json."""
+    p = argparse.ArgumentParser(description='One resident ESMFold2 model for native YAML inputs × explicit seeds')
     for name in ('input', 'output', 'assets', 'checkpoint'):
-        parser.add_argument('--' + name, required=True, type=Path)
-    parser.add_argument('--seeds', nargs='+', type=int, required=True)
-    parser.add_argument('--samples', type=int, default=1)
-    parser.add_argument('--recycles', dest='loops', type=int, default=20,
-                        help='ESMFold2 num_loops (same position as the Boltz recycles flag)')
-    parser.add_argument('--loops', dest='loops', type=int, help='alias for --recycles')
-    parser.add_argument('--steps', type=int, default=200, help='ESMFold2 num_sampling_steps')
-    parser.add_argument('--backend', choices=('fused', 'reference'), default='fused')
-    parser.add_argument('--no-kernels', action='store_true', help='alias for --backend reference')
-    parser.add_argument('--max-parallel-samples', type=int, default=1)
-    parser.add_argument('--output-format', choices=('mmcif', 'cif'), default='mmcif')
-    parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
-    parser.add_argument('--job-timeout', type=float,
-                        help='wall seconds one input x seed job may take; an overrun is recorded as '
-                             "error_kind='timeout' at the next sample/job boundary and later jobs still run")
-    args = parser.parse_args()
+        p.add_argument('--' + name, required=True, type=Path)
+    p.add_argument('--seeds', nargs='+', type=int, required=True)
+    p.add_argument('--samples', type=int, default=1)
+    p.add_argument('--recycles', dest='loops', type=int, default=20,
+                   help='ESMFold2 num_loops (same position as the Boltz recycles flag)')
+    p.add_argument('--loops', dest='loops', type=int, help='alias for --recycles')
+    p.add_argument('--steps', type=int, default=200, help='ESMFold2 num_sampling_steps')
+    p.add_argument('--backend', choices=('fused', 'reference'), default='fused')
+    p.add_argument('--no-kernels', action='store_true', help='alias for --backend reference')
+    p.add_argument('--max-parallel-samples', type=int, default=1)
+    p.add_argument('--output-format', choices=('mmcif',), default='mmcif',
+                   help='ESMFold2 writes mmCIF only; pdb is refused rather than ignored')
+    p.add_argument('--resume', action='store_true')
+    p.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
+    p.add_argument('--job-timeout', type=float,
+                   help='wall seconds one input x seed job may take; an overrun is recorded as '
+                        "error_kind='timeout' at the next sample/job boundary and later jobs still run")
+    return p
+
+
+def main():
+    parser_instance = parser()
+    args = parser_instance.parse_args()
     if args.job_timeout is not None and not (math.isfinite(args.job_timeout) and args.job_timeout > 0):
-        parser.error('--job-timeout must be a positive finite number of seconds')
+        parser_instance.error('--job-timeout must be a positive finite number of seconds')
     stop = Stop()
     previous = signal.signal(signal.SIGTERM, lambda *_: setattr(stop, 'requested', True))
     try:
         if args.max_parallel_samples != 1:
-            parser.error('ESMFold2 samples one trajectory per native call; '
-                         '--max-parallel-samples must be 1')
+            parser_instance.error('ESMFold2 samples one trajectory per native call; '
+                                  '--max-parallel-samples must be 1')
         if args.no_kernels:
             if args.backend == 'fused' and '--backend' in sys.argv:
                 raise SystemExit('--no-kernels conflicts with --backend fused')

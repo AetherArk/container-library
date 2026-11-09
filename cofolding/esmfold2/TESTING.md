@@ -141,3 +141,19 @@ GPU 1 with Trp-cage/ethanol, seed 11, one sample:
 - CPU: 122 tests pass, 2 skipped, run with an interpreter that has the container's dependencies
   (`numpy`, `rdkit`, `gemmi`); the four import errors seen under the PyYAML-only interpreter are
   environmental and reproduce without these changes.
+
+## Robustness should-fix batch (CPU only, 2026-11-09)
+
+- `/home/dan/swr/miniconda3/envs/cheminf/bin/python -m unittest discover -s cofolding/esmfold2/tests`:
+  131 tests, 2 skipped, OK. No GPU, checkpoint, image build or network use.
+- CLI contract: `tests/test_cli_contract.py` reads `cofolding/cli-contract.json`; `--output-format
+  cif` was removed from the worker because the launcher never offered it (decision recorded in the
+  contract file), and `--output-format pdb` remains rejected by the parser.
+- Resume inventory: tests cover an extra unrecorded file (reused, `inventory_extras: 1`), a missing
+  recorded file (rejected) and a changed recorded file (rejected).
+- Verification: an attempt with no `capture/` directory now verifies from its native files; a
+  capture directory that lacks its packet still fails.
+- Image identity: unit tests cover label-first, `COFOLD_IMAGE_ID` second, and null plus
+  `image_id_reason` when neither exists.
+- Not tested here: the Dockerfile image-label mirror is exercised only by an image build, which this
+  batch does not perform.

@@ -113,21 +113,24 @@ def verify_job(prepared, attempt, settings):
         require(plddt.shape == (tokens,), 'native token pLDDT length mismatch')
         require(np.isfinite(plddt).all(), 'non-finite pLDDT')
 
+        # Capture is optional: check the packet only when the attempt contains one,
+        # so an attempt without capture/ is still verified from its native files.
         packet = capture / ('full_result_sample_' + str(index + 1) + '.pt')
-        require(packet.is_file(), 'missing captured native result')
-        import torch
-        result = torch.load(packet, map_location='cpu', weights_only=False)
-        require(result.complex is not None, 'captured result has no complex')
-        positions = np.asarray(result.complex.atom_positions, dtype=np.float64)
-        require(positions.shape == coordinates.shape,
-                'captured coordinate count ' + str(positions.shape) + ' != CIF ' + str(coordinates.shape))
-        deviation = float(np.abs(positions - coordinates).max())
-        require(deviation <= CIF_PRECISION,
-                'captured coordinates differ from the written CIF by ' + str(deviation) + ' A')
-        inventory = read_json(capture / ('full_result_sample_' + str(index + 1) + '_inventory.json'))
-        require(bool(inventory), 'empty captured tensor inventory')
-        for path, entry in inventory.items():
-            require(entry['finite'], 'non-finite captured tensor ' + path)
+        if capture.is_dir():
+            require(packet.is_file(), 'missing captured native result')
+            import torch
+            result = torch.load(packet, map_location='cpu', weights_only=False)
+            require(result.complex is not None, 'captured result has no complex')
+            positions = np.asarray(result.complex.atom_positions, dtype=np.float64)
+            require(positions.shape == coordinates.shape,
+                    'captured coordinate count ' + str(positions.shape) + ' != CIF ' + str(coordinates.shape))
+            deviation = float(np.abs(positions - coordinates).max())
+            require(deviation <= CIF_PRECISION,
+                    'captured coordinates differ from the written CIF by ' + str(deviation) + ' A')
+            inventory = read_json(capture / ('full_result_sample_' + str(index + 1) + '_inventory.json'))
+            require(bool(inventory), 'empty captured tensor inventory')
+            for path, entry in inventory.items():
+                require(entry['finite'], 'non-finite captured tensor ' + path)
 
     require(sorted(p.name for p in native.glob('*_sample_*.cif')) ==
             sorted(rid + '_sample_' + str(i + 1) + '.cif' for i in range(samples)),

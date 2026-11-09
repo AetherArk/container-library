@@ -77,7 +77,7 @@ cofold-run --input /inputs --output /outputs --assets /models --checkpoint /mode
 | `--recycles` | `num_loops` | `--recycles` |
 | `--backend` | `fused` (qualified) or `reference` | `--no-kernels` selects reference |
 | `--max-parallel-samples` | must be `1`; other values are rejected | same flag, batching supported there |
-| `--output-format` | `mmcif`/`cif` only | same flag, `pdb` also allowed there |
+| `--output-format` | `mmcif` only (`cif` was removed: it duplicated `mmcif` and the launcher never offered it; `pdb` is rejected) | same flag, `mmcif`/`pdb` |
 | `--resume` | verify and reuse intact jobs | same |
 | `--benchmark-metadata` | optional allowlisted caller metadata JSON (`/inputs/<name>`, forwarded by the launcher) | same |
 | `--job-timeout` | per input × seed job seconds; overrun is recorded as `error_kind: 'timeout'` | same |

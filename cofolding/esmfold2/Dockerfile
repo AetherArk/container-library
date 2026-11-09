@@ -41,6 +41,10 @@ RUN mkdir -p /workspace/cache /workspace/outputs /workspace/inputs /work \
 ENV ESMFOLD2_CACHE=/workspace/cache TRITON_CACHE_DIR=/workspace/cache/triton \
     HF_HOME=/workspace/cache/hf XDG_CACHE_HOME=/workspace/cache TORCH_HOME=/workspace/cache/torch \
     HF_HUB_DISABLE_XET=1
+# Image identity: the OCI label is the source of truth; the JSON mirror lets the
+# worker inside the container read it without a Docker socket.
+ARG CONTAINER_IMAGE_ID=unknown
+RUN printf '{"image_id": "%s"}\n' "$CONTAINER_IMAGE_ID" > /opt/cofold/image-label.json
 USER ubuntu
 WORKDIR /work
 ENTRYPOINT ["cofold-run"]
@@ -56,4 +60,5 @@ LABEL org.opencontainers.image.title="ESMFold2" \
       org.opencontainers.image.vendor="AetherArk" \
       ai.aetherark.esmfold2.source="https://github.com/Biohub/esm" \
       ai.aetherark.esmfold2.revision="43b4548b86762edfa747b07d5f440aad3c33acee" \
-      ai.aetherark.esmfold2.model_revision="69869f737beffec5294845ede23db5fc0b4f509e"
+      ai.aetherark.esmfold2.model_revision="69869f737beffec5294845ede23db5fc0b4f509e" \
+      ai.aetherark.cofold.image_id="${CONTAINER_IMAGE_ID}"

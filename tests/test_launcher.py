@@ -27,6 +27,10 @@ class LauncherUnitTests(unittest.TestCase):
         for name in ('one.yaml', 'two.yaml'):
             (self.root / 'inputs' / name).write_text('version: 1\n')
         (self.root / 'weights.any').write_bytes(b'unit fixture, not a checkpoint')
+        # The memory preflight reads the real host; pin it so launcher tests are portable.
+        memory = patch.object(launcher, 'available_memory_bytes', return_value=64 * 1024 ** 3)
+        memory.start()
+        self.addCleanup(memory.stop)
         self.argv = ['--image', 'candidate:local', '--inputs', str(self.root / 'inputs'),
                      '--assets', str(self.root / 'assets'), '--checkpoint', str(self.root / 'weights.any'),
                      '--output', str(self.root / 'results'), '--gpu', GPU, '--seeds', '11', '12',
@@ -183,6 +187,94 @@ class LauncherUnitTests(unittest.TestCase):
                     patch.object(launcher.subprocess, 'Popen') as popen:
                 self.assertEqual(launcher.main(self.argv), 2)
                 popen.assert_not_called()
+
+    def test_second_launcher_on_the_same_output_directory_exits_2(self):
+        runtime = self.root / 'results' / '.runtime'
+        runtime.mkdir(parents=True)
+        with (runtime / 'launcher.lock').open('a') as lock:
+            launcher.fcntl.flock(lock, launcher.fcntl.LOCK_EX | launcher.fcntl.LOCK_NB)
+            with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                    patch.object(launcher, 'gpu_available'), \
+                    patch.object(launcher.subprocess, 'Popen') as popen:
+                self.assertEqual(launcher.main(self.argv), 2)
+                popen.assert_not_called()
+
+    def test_preflight_rejects_an_estimate_above_free_disk(self):
+        import contextlib
+        import io
+        stderr = io.StringIO()
+        with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                patch.object(launcher, 'gpu_available'), \
+                patch.object(launcher.subprocess, 'Popen') as popen, \
+                patch.object(launcher.shutil, 'disk_usage', return_value=Mock(free=100)), \
+                contextlib.redirect_stderr(stderr):
+            self.assertEqual(launcher.main(self.argv + ['--estimate-attempt-bytes', '100']), 2)
+        popen.assert_not_called()
+        message = stderr.getvalue()
+        self.assertIn('preflight', message)
+        self.assertIn('100 B/attempt x 4 jobs', message)
+
+    def test_preflight_rejects_memory_above_host_available(self):
+        import contextlib
+        import io
+        stderr = io.StringIO()
+        with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                patch.object(launcher, 'gpu_available'), \
+                patch.object(launcher.subprocess, 'Popen') as popen, \
+                patch.object(launcher, 'available_memory_bytes', return_value=1024 ** 3), \
+                contextlib.redirect_stderr(stderr):
+            self.assertEqual(launcher.main(self.argv + ['--memory', '2g']), 2)
+        popen.assert_not_called()
+        message = stderr.getvalue()
+        self.assertIn('preflight', message)
+        self.assertIn('2g', message)
+        self.assertIn(str(1024 ** 3), message)
+
+    def test_preflight_without_an_estimate_records_free_space_and_skips_comparison(self):
+        import contextlib
+        import io
+        stdout = io.StringIO()
+        def popen(cmd):
+            (self.root / 'results/run.json').write_text(json.dumps({'schema': 1, 'status': 'complete'}))
+            return Mock(poll=Mock(return_value=0), wait=Mock(return_value=0))
+        with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                patch.object(launcher, 'gpu_available'), \
+                patch.object(launcher.subprocess, 'Popen', side_effect=popen), \
+                patch.object(launcher.shutil, 'disk_usage', return_value=Mock(free=123456789)), \
+                contextlib.redirect_stdout(stdout):
+            self.assertEqual(launcher.main(self.argv), 0)
+        preflight = json.loads((self.root / 'results/run.json').read_text())['preflight']
+        self.assertIsNone(preflight['estimate_attempt_bytes'])
+        self.assertEqual(preflight['free_bytes_output'], 123456789)
+        self.assertEqual(preflight['disk_check'], 'skipped_no_estimate')
+        self.assertIn('comparison skipped', stdout.getvalue())
+
+    def test_preflight_records_estimate_and_measured_free_space(self):
+        def popen(cmd):
+            (self.root / 'results/run.json').write_text(json.dumps({'schema': 1, 'status': 'complete'}))
+            return Mock(poll=Mock(return_value=0), wait=Mock(return_value=0))
+        with patch.object(launcher, 'resolve_image', return_value=IMAGE), \
+                patch.object(launcher, 'gpu_available'), \
+                patch.object(launcher.subprocess, 'Popen', side_effect=popen), \
+                patch.object(launcher.shutil, 'disk_usage', return_value=Mock(free=10 ** 12)):
+            self.assertEqual(launcher.main(self.argv + ['--estimate-attempt-bytes', '1000']), 0)
+        preflight = json.loads((self.root / 'results/run.json').read_text())['preflight']
+        self.assertEqual(preflight['estimate_attempt_bytes'], 1000)
+        self.assertEqual(preflight['estimated_total_bytes'], 4000)
+        self.assertEqual(preflight['free_bytes_output'], 10 ** 12)
+        self.assertEqual(preflight['disk_check'], 'compared')
+
+    def test_launcher_flags_match_the_shared_cli_contract(self):
+        contract = json.loads((Path(__file__).resolve().parents[1] / 'cofolding/cli-contract.json').read_text())
+        parsed = launcher.parser()
+        for flag, spec in contract['flags'].items():
+            action = parsed._option_string_actions.get(flag)
+            if action is None:
+                continue
+            with self.subTest(flag=flag):
+                self.assertEqual(action.required, spec['required'])
+                if spec['type'] == 'enum':
+                    self.assertEqual(list(action.choices), list(spec['domain']))
 
     def test_timeout_terminates_owned_container_and_returns_124(self):
         process = Mock(poll=Mock(side_effect=[None, None, 137]), wait=Mock(return_value=137))
