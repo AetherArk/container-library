@@ -13,7 +13,7 @@
 | Chai-1 0.6.1 | `ghcr.io/aetherark/chai1:0.6.1-worker-rc1` | `sha256:42c9f2ebab68555daaa2b5d5604c42cfc14a6476000c6cdc566dd5895573d08e` | [usage](cofolding/chai1/README.md), [evidence](cofolding/chai1/TESTING.md) |
 | Protenix 2.0.0 | `ghcr.io/aetherark/protenix:2.0.0-worker-rc1` | `sha256:89f714e896561ab958d3c1f351b49918501c371f5a5553692b4030be2e7d0c00` | [usage](cofolding/protenix/README.md), [evidence](cofolding/protenix/TESTING.md) |
 
-- The Boltz2 and ESMFold2 packages are public; anonymous `docker pull` works. All tags: [boltz2](https://github.com/orgs/AetherArk/packages/container/package/boltz2), [esmfold2](https://github.com/orgs/AetherArk/packages/container/package/esmfold2). Protenix has no image yet.
+- All four packages are public and anonymous `docker pull` works: [boltz2](https://github.com/orgs/AetherArk/packages/container/package/boltz2), [esmfold2](https://github.com/orgs/AetherArk/packages/container/package/esmfold2), [chai1](https://github.com/orgs/AetherArk/packages/container/package/chai1), [protenix](https://github.com/orgs/AetherArk/packages/container/package/protenix).
 - Model weights and asset caches stay outside the images; each method's `fetch_assets.py --download` populates a cache you mount.
 - Tags name the upstream version and worker build; no `latest` tag is published. Quote the digest when a build must be fixed.
 
