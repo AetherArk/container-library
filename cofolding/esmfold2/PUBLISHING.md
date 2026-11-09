@@ -71,3 +71,8 @@
   `sha256:1ef048b21711965e72a729d5d39647db3de57911c05a94d0b3b7d13a10b82be3`, published by run
   42530589045 from the observability-contract merge. Adds `failure.json`, `progress.json` liveness
   fields, `schema` on every JSON artifact and `--job-timeout`. Current recommended tag.
+- `3.4.1.post1-worker-rc5` — digest
+  `sha256:2c18d66e843138eb5cfd7c0c7a902f7a5ce344052262ab2183e591f3ea5b037f`, published by run
+  42552341614 after a retry: the first attempt (42551658940) failed in `apt-get install` because the
+  runner's Debian mirror served no candidates for ninja-build, cmake and libgl1. Adds in-container
+  ipSAE from the PAE token map and `--derived none|tensors`. Current recommended tag.

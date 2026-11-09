@@ -34,3 +34,8 @@
   fields, `schema` on every JSON artifact, CUDA OOM classification, launcher `--benchmark-metadata`,
   `--job-timeout` and `termination.json`. Current recommended tag.
 - `2.2.1-worker-v3-benchmark-rc1` — previous tag, superseded.
+- `2.2.1-worker-v5-ipsae-rc1` — digest
+  `sha256:7821f9c67f4a61d34afad4764f1ca6d070856a01685e825e32cf56ec29dcfc54`, published by workflow
+  run 42551648827: interface scores computed in-container from the PAE token map (ipSAE family,
+  d0chn/d0dom, per-pair ipTM, interface PAE statistics) with `--derived none|tensors`. Current
+  recommended tag.
