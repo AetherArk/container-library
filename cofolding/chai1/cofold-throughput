@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec python /opt/cofold/throughput_benchmark.py "$@"

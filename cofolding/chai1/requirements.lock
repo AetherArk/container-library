@@ -1,0 +1,29 @@
+--extra-index-url https://download.pytorch.org/whl/cu130
+# chai_lab 0.6.1 is installed with --no-deps AFTER this list (see Dockerfile):
+# its metadata pins torch<2.7, while an RTX 50-series (sm_120) GPU needs a
+# Blackwell-capable wheel. torch 2.11.0+cu130 is installed explicitly and the
+# remaining direct dependencies are pinned here.
+torch==2.11.0
+attrs==25.3.0
+aiohttp==3.10.11
+antipickle==0.2.0
+beartype==0.20.2
+biopython==1.84
+einops==0.8.1
+filelock==3.15.4
+gemmi==0.6.7
+jaxtyping==0.2.36
+matplotlib==3.9.2
+modelcif==1.3
+numba==0.60.0
+numpy==1.26.4
+pandas==2.1.4
+pandera==0.20.4
+pyarrow==17.0.0
+PyYAML==6.0.3
+rdkit==2024.9.5
+requests==2.32.3
+tmtools==0.0.3
+tqdm==4.66.5
+typer-slim==0.12.5
+typing-extensions==4.12.2
