@@ -3,7 +3,7 @@
   "description": "Shared cofold worker/launcher CLI contract. Every container's tests/test_cli_contract.py reads this file and fails when a flag marked 'supported' or 'rejected' is missing from the installed argparse parser or advertises a different domain. Status values are exactly supported, rejected and unknown: 'supported' means every value in the domain is accepted; 'rejected' means the flag is not accepted at all, or only the values in container_domain are accepted; 'unknown' means no per-container decision has been made.",
   "output_format_decision": {
     "decision": "The worker accepts mmcif only; cif was removed.",
-    "reason": "run_cofold.py allows mmcif|pdb, so --output-format cif at the ESMFold2 worker was unreachable through the launcher while duplicating mmcif byte for byte. Every value each container accepts is now reachable through the shared launcher: mmcif and pdb for Boltz2, mmcif for ESMFold2 and Chai-1, with pdb rejected by name because those engines write mmCIF only.",
+    "reason": "run_cofold.py allows mmcif|pdb, so --output-format cif at the ESMFold2 worker was unreachable through the launcher while duplicating mmcif byte for byte. Every value each container accepts is now reachable through the shared launcher: mmcif and pdb for Boltz2, mmcif for ESMFold2 and Chai-1, with pdb rejected by name because those engines write mmCIF only; Protenix likewise writes mmCIF only.",
     "containers": {
       "boltz2": [
         "mmcif",
@@ -13,6 +13,9 @@
         "mmcif"
       ],
       "chai1": [
+        "mmcif"
+      ],
+      "protenix": [
         "mmcif"
       ]
     }
@@ -25,7 +28,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--output": {
@@ -35,7 +39,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--assets": {
@@ -45,7 +50,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--checkpoint": {
@@ -55,7 +61,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--seeds": {
@@ -65,7 +72,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--samples": {
@@ -75,7 +83,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--recycles": {
@@ -85,7 +94,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--steps": {
@@ -95,7 +105,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--max-parallel-samples": {
@@ -109,16 +120,21 @@
         ],
         "chai1": [
           "1"
+        ],
+        "protenix": [
+          "1"
         ]
       },
       "containers": {
         "boltz2": "supported",
         "esmfold2": "rejected",
-        "chai1": "rejected"
+        "chai1": "rejected",
+        "protenix": "rejected"
       },
       "reason": {
         "esmfold2": "ESMFold2 folds one trajectory per native call; a value above 1 is refused by the parser before inference.",
-        "chai1": "Chai-1 folds one sample per native call; a value above 1 is refused by the parser before inference."
+        "chai1": "Chai-1 folds one sample per native call; a value above 1 is refused by the parser before inference.",
+        "protenix": "Protenix folds one diffusion sample per native call in this container, so a value above 1 is refused by the parser before inference."
       }
     },
     "--no-kernels": {
@@ -128,10 +144,12 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "rejected"
+        "chai1": "rejected",
+        "protenix": "rejected"
       },
       "reason": {
-        "chai1": "chai_lab 0.6.1 exposes no fused/reference kernel switch; the flag has no Chai-1 equivalent."
+        "chai1": "chai_lab 0.6.1 exposes no fused/reference kernel switch; the flag has no Chai-1 equivalent.",
+        "protenix": "The released protenix-v2 checkpoint runs its configured triangle kernels (cuequivariance) unconditionally; there is no fused/reference switch to turn off."
       }
     },
     "--use-potentials": {
@@ -141,11 +159,13 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "rejected",
-        "chai1": "rejected"
+        "chai1": "rejected",
+        "protenix": "rejected"
       },
       "reason": {
         "esmfold2": "No ESMFold2 equivalent; the capability is not part of that engine.",
-        "chai1": "No Chai-1 equivalent; the capability is not part of that engine."
+        "chai1": "No Chai-1 equivalent; the capability is not part of that engine.",
+        "protenix": "No Protenix equivalent; the capability is not part of this engine."
       }
     },
     "--backend": {
@@ -158,10 +178,12 @@
       "containers": {
         "boltz2": "unknown",
         "esmfold2": "supported",
-        "chai1": "rejected"
+        "chai1": "rejected",
+        "protenix": "rejected"
       },
       "reason": {
-        "chai1": "chai_lab 0.6.1 exposes no selectable kernel backend; the flag is not accepted."
+        "chai1": "chai_lab 0.6.1 exposes no selectable kernel backend; the flag is not accepted.",
+        "protenix": "protenix 2.0.0 exposes no selectable kernel backend at the worker CLI; triangle attention/multiplicative kernels are configuration, not a runtime backend switch."
       }
     },
     "--loops": {
@@ -171,7 +193,8 @@
       "containers": {
         "boltz2": "unknown",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--output-format": {
@@ -191,16 +214,21 @@
         ],
         "chai1": [
           "mmcif"
+        ],
+        "protenix": [
+          "mmcif"
         ]
       },
       "containers": {
         "boltz2": "supported",
         "esmfold2": "rejected",
-        "chai1": "rejected"
+        "chai1": "rejected",
+        "protenix": "rejected"
       },
       "reason": {
         "esmfold2": "ESMFold2 writes mmCIF only; pdb is refused with an explicit message. cif is not a shared value and was removed from the worker.",
-        "chai1": "Chai-1 writes mmCIF only; pdb is refused with an explicit message."
+        "chai1": "Chai-1 writes mmCIF only; pdb is refused with an explicit message.",
+        "protenix": "Protenix writes mmCIF only; pdb is refused with an explicit message."
       }
     },
     "--capture": {
@@ -213,11 +241,13 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "rejected",
-        "chai1": "rejected"
+        "chai1": "rejected",
+        "protenix": "rejected"
       },
       "reason": {
         "esmfold2": "The ESMFold2 container writes capture/ unconditionally and has no opt-out flag (container-development.md section 16); --capture is not accepted.",
-        "chai1": "The Chai-1 container writes its native arrays unconditionally and has no opt-out flag; --capture is not accepted."
+        "chai1": "The Chai-1 container writes its native arrays unconditionally and has no opt-out flag; --capture is not accepted.",
+        "protenix": "The Protenix container writes its native PAE/PDE/atom-pLDDT arrays unconditionally and has no opt-out flag; --capture is not accepted."
       }
     },
     "--derived": {
@@ -230,12 +260,14 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       },
       "reason": {
         "boltz2": "Default 'tensors' scores the written PAE with the shared ipSAE module and writes metrics/derived.json before capture may be dropped; works with --capture none.",
         "esmfold2": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected.",
-        "chai1": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected."
+        "chai1": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected.",
+        "protenix": "Default 'tensors' scores each written sample's token_pair_pae against its Protenix token map and writes metrics/derived.json; the native arrays are written either way."
       }
     },
     "--resume": {
@@ -245,7 +277,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--benchmark-metadata": {
@@ -255,7 +288,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     },
     "--job-timeout": {
@@ -265,7 +299,8 @@
       "containers": {
         "boltz2": "supported",
         "esmfold2": "supported",
-        "chai1": "supported"
+        "chai1": "supported",
+        "protenix": "supported"
       }
     }
   }

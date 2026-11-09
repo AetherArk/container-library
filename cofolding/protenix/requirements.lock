@@ -1,0 +1,105 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+# protenix 2.0.0 is installed with --no-deps AFTER this list (see Dockerfile): its metadata
+# would otherwise resolve its declared dependencies to whatever PyPI serves that day, while
+# this file is the exact `pip freeze` of the working local/protenix:2.0.0 environment. The
+# CUDA runtime wheels (nvidia-*-cu12) and triton are deliberately not pinned here: they are
+# exact dependencies of the torch 2.7.1+cu128 wheel and are installed with it.
+# torch/torchvision/torchaudio 2.7.1+cu128 / 0.22.1+cu128 are installed explicitly above.
+# Deliberately not installed, although both are in the proven freeze:
+# - deepspeed 0.17.5: imported lazily only when triangle_attention='deepspeed', which this
+#   container never selects; the cuequivariance kernels are the proven path.
+# - scikit-learn-extra 0.3.0: nothing in protenix, runner or configs imports it, it has no
+#   cp312 wheel, and its sdist does not build against numpy>=2.
+absl-py==2.4.0
+annotated-types==0.7.0
+asttokens==3.0.1
+biopython==1.85
+biotite==1.4.0
+biotraj==1.2.2
+certifi==2026.2.25
+charset-normalizer==3.4.7
+click==8.3.2
+colorama==0.4.6
+comm==0.2.3
+contourpy==1.3.3
+cuequivariance-ops-cu12==0.8.0
+cuequivariance-ops-torch-cu12==0.8.0
+cuequivariance-torch==0.8.0
+cuequivariance==0.9.1
+cycler==0.12.1
+decorator==5.2.1
+einops==0.8.2
+executing==2.2.1
+fair-esm==2.0.0
+filelock==3.25.2
+fonttools==4.62.1
+fsspec==2026.2.0
+gemmi==0.6.7
+gitdb==4.0.12
+GitPython==3.1.46
+hjson==3.1.0
+icecream==2.1.7
+idna==3.11
+ihm==2.10
+ipdb==0.13.13
+ipython==9.10.1
+ipython_pygments_lexers==1.1.1
+ipywidgets==8.1.7
+jedi==0.19.2
+Jinja2==3.1.6
+joblib==1.5.3
+jupyterlab_widgets==3.0.16
+kiwisolver==1.5.0
+MarkupSafe==3.0.3
+matplotlib-inline==0.2.1
+matplotlib==3.10.5
+ml_collections==1.1.0
+modelcif==1.4
+mpmath==1.3.0
+msgpack==1.1.2
+networkx==3.6.1
+ninja==1.13.0
+numpy==2.4.1
+nvidia-ml-py==13.595.45
+opt_einsum==3.4.0
+optree==0.17.0
+packaging==26.1
+pandas==2.3.1
+parso==0.8.6
+pdbeccdutils==1.0.0
+pexpect==4.9.0
+pillow==12.1.1
+platformdirs==4.9.6
+prompt_toolkit==3.0.52
+protobuf==6.31.1
+psutil==7.2.2
+ptyprocess==0.7.0
+pure_eval==0.2.3
+py-cpuinfo==9.0.0
+py3Dmol==2.5.2
+pydantic==2.13.0
+pydantic_core==2.46.0
+Pygments==2.20.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+pytz==2026.1.post1
+PyYAML==6.0.2
+rdkit==2025.9.3
+requests==2.33.1
+scikit-learn==1.7.1
+scipy==1.17.1
+sentry-sdk==2.58.0
+six==1.17.0
+smmap==5.0.3
+stack-data==0.6.3
+sympy==1.14.0
+threadpoolctl==3.6.0
+tqdm==4.67.1
+traitlets==5.14.3
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.1
+urllib3==2.6.3
+wandb==0.21.1
+wcwidth==0.6.0
+widgetsnbextension==4.0.15

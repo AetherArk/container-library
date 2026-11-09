@@ -1,0 +1,33 @@
+{
+  "source": "https://huggingface.co/TMF001/protenix-v2-weights + https://protenix.tos-cn-beijing.volces.com/common",
+  "revision": "protenix-v2 checkpoint at HF revision 653edab28103133512575365130916e3fd23ecc3; Protenix 2.0.0 inference data cache (common/)",
+  "layout": "Mounted as PROTENIX_ROOT_DIR: checkpoint/protenix-v2.pt plus common/ (the four files protenix.data.inference.infer_dataloader resolves under $PROTENIX_ROOT_DIR)",
+  "files": {
+    "checkpoint/protenix-v2.pt": {
+      "url": "https://huggingface.co/TMF001/protenix-v2-weights/resolve/653edab28103133512575365130916e3fd23ecc3/protenix-v2.pt",
+      "upstream_revision": "653edab28103133512575365130916e3fd23ecc3",
+      "bytes": 1859785497,
+      "sha256": "8f931f9774a396b67033d0e58628e1834f4a1448165e04254b40a780b0c0d599"
+    },
+    "common/components.cif": {
+      "url": "https://protenix.tos-cn-beijing.volces.com/common/components.cif",
+      "bytes": 490777362,
+      "sha256": "bb31ae5cf6c8bc669924313077cb4231ee5ffefd3a20118cd14f3ec89f8bb6a5"
+    },
+    "common/components.cif.rdkit_mol.pkl": {
+      "url": "https://protenix.tos-cn-beijing.volces.com/common/components.cif.rdkit_mol.pkl",
+      "bytes": 142498117,
+      "sha256": "d1cfb71f5993a3ebea7c47877022d7f597bbfbaf86e28a4770e957da6c50cd35"
+    },
+    "common/clusters-by-entity-40.txt": {
+      "url": "https://protenix.tos-cn-beijing.volces.com/common/clusters-by-entity-40.txt",
+      "bytes": 21699572,
+      "sha256": "1ab4af905e75b382eda8dec59917dc3608bee0729e36b9e71baf860bbe86850c"
+    },
+    "common/obsolete_release_date.csv": {
+      "url": "https://protenix.tos-cn-beijing.volces.com/common/obsolete_release_date.csv",
+      "bytes": 134716,
+      "sha256": "a4f3f63ac5d7eebd78b07995cc669b9eccd6f5d8813c9492c9df02868893cf33"
+    }
+  }
+}

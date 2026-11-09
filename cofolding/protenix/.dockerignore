@@ -1,0 +1,16 @@
+*
+!Dockerfile
+!requirements.lock
+!build_kernel.py
+!build_probe.py
+!fetch_assets.py
+!assets.json
+!throughput_benchmark.py
+!cofold-throughput
+!cloud_job.py
+!prepare_cloud_job.py
+!cofold-cloud-run
+!resident/
+!resident/**
+**/__pycache__
+**/*.pyc
