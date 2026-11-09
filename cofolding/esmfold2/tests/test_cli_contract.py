@@ -1,14 +1,24 @@
-"""Worker command-line contract: Boltz-compatible flags mapped onto ESMFold2 settings."""
-import argparse
+"""Worker command-line contract: shared flags are read from cofolding/cli-contract.json."""
+import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parents[1]
 sys.path.insert(0, str(ROOT))
 
 import resident.worker as worker  # noqa: E402
+
+CONTRACT = json.loads((REPO / 'cofolding/cli-contract.json').read_text())
+CONTAINER = 'esmfold2'
+
+_launcher_spec = importlib.util.spec_from_file_location('cli_contract_launcher', REPO / 'run_cofold.py')
+assert _launcher_spec is not None and _launcher_spec.loader is not None
+launcher = importlib.util.module_from_spec(_launcher_spec)
+_launcher_spec.loader.exec_module(launcher)
 
 
 def parse(argv):
@@ -39,6 +49,48 @@ BASE = ['--input', 'in', '--output', 'out', '--assets', 'assets', '--checkpoint'
         '--seeds', '11']
 
 
+class ContractTests(unittest.TestCase):
+    """The one machine-readable table, checked against the installed parser."""
+
+    def action(self, flag):
+        return worker.parser()._option_string_actions.get(flag)
+
+    def test_every_table_flag_is_implemented_with_its_declared_domain(self):
+        for flag, spec in CONTRACT['flags'].items():
+            status = spec['containers'][CONTAINER]
+            if status == 'unknown':
+                continue
+            with self.subTest(flag=flag, status=status):
+                action = self.action(flag)
+                if status == 'rejected' and action is None:
+                    self.assertEqual(spec.get('container_domain', {}).get(CONTAINER, []), [])
+                    self.assertTrue(spec['reason'][CONTAINER])
+                    continue
+                self.assertIsNotNone(action, flag + ' is ' + status + ' in cli-contract.json '
+                                     'but missing from the installed parser')
+                self.assertEqual(action.required, spec['required'])
+                if spec['type'] == 'enum':
+                    domain = spec.get('container_domain', {}).get(CONTAINER, spec['domain'])
+                    self.assertEqual(list(action.choices), list(domain),
+                                     flag + ' advertises a different domain than cli-contract.json')
+
+    def test_every_accepted_worker_value_is_reachable_through_the_launcher(self):
+        launched = launcher.parser()
+        for flag, spec in CONTRACT['flags'].items():
+            worker_action = self.action(flag)
+            launcher_action = launched._option_string_actions.get(flag)
+            if worker_action is None or launcher_action is None or spec['type'] != 'enum':
+                continue
+            with self.subTest(flag=flag):
+                self.assertEqual(list(launcher_action.choices), list(spec['domain']))
+                self.assertLessEqual(set(worker_action.choices), set(launcher_action.choices))
+
+    def test_output_format_cif_is_not_a_shared_value(self):
+        decision = CONTRACT['output_format_decision']
+        self.assertNotIn('cif', decision['containers'][CONTAINER])
+        self.assertEqual(list(self.action('--output-format').choices), ['mmcif'])
+
+
 class CliTests(unittest.TestCase):
     def test_defaults_match_the_engine(self):
         code, seeds, settings = parse(BASE)
@@ -67,6 +119,11 @@ class CliTests(unittest.TestCase):
     def test_pdb_output_is_rejected(self):
         with self.assertRaises(SystemExit):
             parse(BASE + ['--output-format', 'pdb'])
+
+    def test_cif_output_is_rejected(self):
+        # cif used to be accepted here while the launcher could never send it.
+        with self.assertRaises(SystemExit):
+            parse(BASE + ['--output-format', 'cif'])
 
     def test_parallel_samples_above_one_is_rejected_before_inference(self):
         with self.assertRaises(SystemExit):

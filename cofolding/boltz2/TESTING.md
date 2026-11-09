@@ -75,3 +75,26 @@ GPU 1 with Trp-cage/ethanol, seed 11, one sample, three recycles, 200 steps, `--
 
 CPU: 131 tests pass, 2 skipped, including the new failure-redaction, liveness, schema, OOM-double and
 launcher tests.
+
+## Robustness should-fix batch (CPU only, 2026-11-09)
+
+- `cofolding/boltz2/.venv/bin/python scripts/test_local.py --suite cpu`: the Boltz2 package suite
+  ran 138 tests, 2 skipped, OK; the shared `tests/` suite ran 37 tests, OK. No GPU, checkpoint,
+  image build or network use.
+- CLI contract: `tests/test_cli_contract.py` reads `cofolding/cli-contract.json` and checks every
+  table flag against the installed `resident.worker` parser (presence, requiredness, enum domain),
+  and that every value the worker accepts is also offered by `run_cofold.py`. Unit evidence only.
+- Resume inventory: tests cover an extra unrecorded file (reused, `inventory_extras: 1`), a missing
+  recorded file (rejected) and a changed recorded file (rejected).
+- Protocol: `prepare` now writes `protocol.json` (engine, resolved settings, base seed, seed
+  formula, engine entry point); the test asserts the file is in `receipt.json`'s inventory and is
+  referenced from the job as `protocol: protocol.json`.
+- Image identity: unit tests cover label-first, `COFOLD_IMAGE_ID` second, and null plus
+  `image_id_reason` when neither exists; `run.json.implementation.image_id` is asserted for the
+  label case.
+- Launcher (shared suite): second launch on the same output directory exits 2; preflight rejects a
+  disk estimate above free space and `--memory` above host memory with exit 2; the estimated and
+  measured values appear under `run.json.preflight`; without `--estimate-attempt-bytes` the free
+  bytes are recorded, the comparison is skipped and the launcher says so.
+- Not tested here: the Dockerfile image-label mirror is exercised only by an image build, which this
+  batch does not perform.

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -32,6 +33,10 @@ def parser():
     p.add_argument('--benchmark-metadata',
                    help='Optional caller-metadata JSON file inside --inputs; forwarded as /inputs/<name>')
     p.add_argument('--lock-root', help='Shared COFOLD_GPU_LOCK_ROOT / XDG user-state GPU locks')
+    p.add_argument('--estimate-attempt-bytes', type=int,
+                   help='Optional caller estimate of bytes one attempt needs; compared with free '
+                        'space on the output filesystem before dispatch. Absent: free space is '
+                        'recorded and only the comparison is skipped.')
     p.add_argument('--dry-run', action='store_true')
     for name in ('samples', 'recycles', 'steps', 'max-parallel-samples'):
         p.add_argument('--' + name, type=int)
@@ -82,6 +87,8 @@ def validate(a):
         raise ValueError('Invalid CPU/memory limits')
     if any(x is not None and (not math.isfinite(x) or x <= 0) for x in (a.timeout, a.stop_grace, a.job_timeout)):
         raise ValueError('Timeout, job timeout and stop grace must be positive finite seconds')
+    if a.estimate_attempt_bytes is not None and a.estimate_attempt_bytes < 0:
+        raise ValueError('--estimate-attempt-bytes must be a non-negative integer')
     if a.benchmark_metadata is not None:
         # The container sees only /inputs; a host path is never forwarded.
         metadata = mount_path(a.benchmark_metadata)
@@ -234,6 +241,98 @@ def last_progress(output):
     return data if isinstance(data, dict) else None
 
 
+def memory_bytes(value):
+    """Parse the same size syntax validate() accepts into bytes."""
+    match = re.fullmatch(r'([1-9][0-9]*)([bkmgBKMG]?)', value)
+    if not match:
+        raise ValueError('Invalid memory size')
+    factors = {'': 1, 'b': 1, 'k': 1024, 'm': 1024 ** 2, 'g': 1024 ** 3}
+    return int(match.group(1)) * factors[match.group(2).lower()]
+
+
+def available_memory_bytes():
+    """Host MemAvailable in bytes, or None when /proc/meminfo cannot be read."""
+    try:
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            if line.startswith('MemAvailable:'):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def job_count(inputs, seeds):
+    """Number of attempts one invocation will prepare: native YAML inputs x seeds."""
+    sources = [p for p in Path(inputs).iterdir()
+               if p.is_file() and p.suffix.lower() in ('.yaml', '.yml')]
+    return len(sources) * len(seeds)
+
+
+def preflight(a, output):
+    """Measure disk and memory before dispatch; never invents an attempt size."""
+    jobs = job_count(a.inputs, a.seeds)
+    free = shutil.disk_usage(str(output)).free
+    estimate = a.estimate_attempt_bytes
+    required = estimate * jobs if estimate is not None else None
+    memory_requested = memory_bytes(a.memory)
+    memory_available = available_memory_bytes()
+    return {
+        'schema': 1,
+        'jobs': jobs,
+        'estimate_attempt_bytes': estimate,
+        'estimated_total_bytes': required,
+        'free_bytes_output': free,
+        'disk_check': 'skipped_no_estimate' if estimate is None else 'compared',
+        'memory_requested': a.memory,
+        'memory_requested_bytes': memory_requested,
+        'memory_available_bytes': memory_available,
+        'memory_check': 'skipped_unavailable' if memory_available is None else 'compared',
+    }
+
+
+def check_preflight(record, output):
+    """Reject an over-committed attempt before any container starts (exit 2)."""
+    estimate = record['estimate_attempt_bytes']
+    if estimate is not None and record['free_bytes_output'] < record['estimated_total_bytes']:
+        raise ValueError(
+            f'preflight: free disk {record["free_bytes_output"]} B on {output} is below the '
+            f'estimated {record["estimated_total_bytes"]} B '
+            f'({estimate} B/attempt x {record["jobs"]} jobs)')
+    available = record['memory_available_bytes']
+    if available is not None and record['memory_requested_bytes'] > available:
+        raise ValueError(
+            f'preflight: --memory {record["memory_requested"]} '
+            f'({record["memory_requested_bytes"]} B) exceeds host available memory ({available} B)')
+
+
+def write_json(path, obj):
+    path = Path(path)
+    fd, name = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(obj, stream, indent=2, allow_nan=False)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def merge_preflight(output, report):
+    """Attach the measured preflight values to the worker's run.json."""
+    path = Path(output) / 'run.json'
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    data['preflight'] = report
+    write_json(path, data)
+
+
 def write_termination(output, cidfile, reason, signal_name, exit_code):
     """Record a launcher-killed or signalled run; never called for a normal exit."""
     payload = {'schema': 1, 'reason': reason, 'signal': signal_name, 'exit_code': int(exit_code),
@@ -285,6 +384,12 @@ def main(argv=None):
                 lock = stack.enter_context(path.open('a'))
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             gpu_available(a.gpu)
+            report = preflight(a, a.output)
+            if report['disk_check'] == 'skipped_no_estimate':
+                print(f"preflight: no --estimate-attempt-bytes; recorded "
+                      f"{report['free_bytes_output']} B free on {a.output}, disk comparison skipped",
+                      flush=True)
+            check_preflight(report, a.output)
             for name in ('home', 'tmp', 'cache'):
                 (runtime / name).mkdir(exist_ok=True)
             receipt = a.output / 'run.json'
@@ -297,16 +402,22 @@ def main(argv=None):
                     write_termination(a.output, cidfile, termination['reason'], termination['signal'], rc)
                 except OSError as exc:
                     print(f'termination.json not written: {exc}', file=sys.stderr)
+            current = False
             try:
                 if not receipt.exists() or receipt.stat().st_mtime_ns == before:
                     raise ValueError('No current run.json written by worker')
                 success = terminal_receipt(receipt)
+                current = True
                 if rc == 0 and not success:
-                    return 1
+                    rc = 1
             except (ValueError, OSError) as exc:
                 print(f'Receipt verification failed: {exc}', file=sys.stderr)
                 if rc == 0:
-                    return 1
+                    rc = 1
+            # Only a run.json this invocation wrote gets the measured values; merging
+            # before the mtime check would make a stale receipt look current.
+            if current:
+                merge_preflight(a.output, report)
             return rc
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f'cofold launcher: {exc}', file=sys.stderr)

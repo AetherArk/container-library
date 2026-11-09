@@ -270,16 +270,57 @@ class LifecycleTests(unittest.TestCase):
             self.go(settings=Settings(samples=0))
         self.assertEqual(FakeEngine.loads, 0)
 
-    def test_extra_or_missing_output_invalidates_receipt(self):
+    def test_extra_output_file_is_tolerated_and_counted(self):
         (self.inputs / 'good.yaml').write_text('good')
         self.go((11,))
         attempt = self.output / self.metadata()['jobs'][0]['output']
         (attempt / 'unrecorded').write_text('extra')
+        self.assertEqual(self.go((11,), resume=True), 0)
+        job = self.metadata()['jobs'][0]
+        self.assertTrue(job['reused'])
+        self.assertEqual(job['inventory_extras'], 1)
+        self.assertEqual(FakeEngine.loads, 1)
+
+    def test_missing_recorded_output_invalidates_receipt(self):
+        (self.inputs / 'good.yaml').write_text('good')
+        self.go((11,))
+        attempt = self.output / self.metadata()['jobs'][0]['output']
+        (attempt / 'payload').unlink()
         self.go((11,), resume=True)
-        second = self.output / self.metadata()['jobs'][0]['output']
-        (second / 'payload').unlink()
+        self.assertFalse(self.metadata()['jobs'][0]['reused'])
+        self.assertEqual(FakeEngine.loads, 2)
+
+    def test_changed_recorded_output_invalidates_receipt(self):
+        (self.inputs / 'good.yaml').write_text('good')
+        self.go((11,))
+        attempt = self.output / self.metadata()['jobs'][0]['output']
+        (attempt / 'payload').write_text('corrupted')
         self.go((11,), resume=True)
-        self.assertEqual(FakeEngine.loads, 3)
+        self.assertFalse(self.metadata()['jobs'][0]['reused'])
+        self.assertEqual(FakeEngine.loads, 2)
+
+    def test_image_identity_prefers_label_then_env_then_reason(self):
+        (self.inputs / 'good.yaml').write_text('good')
+        from unittest.mock import patch
+        from resident import worker
+        label = self.root / 'image-label.json'
+        with patch.object(worker, 'IMAGE_LABEL', label):
+            label.write_text(json.dumps({'image_id': 'sha256:' + 'b' * 64}))
+            with patch.dict(os.environ, {'COFOLD_IMAGE_ID': 'sha256:' + 'c' * 64}):
+                self.assertEqual(worker.image_identity(),
+                                 {'image_id': 'sha256:' + 'b' * 64, 'image_id_source': 'image_label'})
+                self.go((11,))
+                implementation = self.metadata()['implementation']
+                self.assertEqual(implementation['image_id'], 'sha256:' + 'b' * 64)
+                self.assertEqual(implementation['image_id_source'], 'image_label')
+            label.unlink()
+            with patch.dict(os.environ, {'COFOLD_IMAGE_ID': 'sha256:' + 'c' * 64}):
+                self.assertEqual(worker.image_identity(),
+                                 {'image_id': 'sha256:' + 'c' * 64, 'image_id_source': 'env'})
+            with patch.dict(os.environ, {}, clear=True):
+                result = worker.image_identity()
+                self.assertIsNone(result['image_id'])
+                self.assertIn('no image label', result['image_id_reason'])
 
     def test_output_lock_prevents_concurrent_workers(self):
         import fcntl

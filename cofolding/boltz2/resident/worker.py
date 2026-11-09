@@ -14,6 +14,10 @@ import uuid
 from .benchmark import Benchmark, SCHEMA, load_metadata, error_label, write_failure
 from .errors import is_cuda_oom, release_exception
 
+# Mirror of the image label ai.aetherark.cofold.image_id, written by the Dockerfile
+# from CONTAINER_IMAGE_ID so the worker can read its own image identity.
+IMAGE_LABEL = Path('/opt/cofold/image-label.json')
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -112,14 +116,59 @@ def inventory(attempt):
             if p.is_file() and p.name != 'receipt.json'}
 
 
+def image_identity():
+    """Identify the installed image: baked label first, launcher env second.
+
+    A direct `docker run` (no launcher env, no label) records an explicit null and
+    the reason instead of a bare null.
+    """
+    label = None
+    try:
+        data = json.loads(IMAGE_LABEL.read_text())
+        candidate = data.get('image_id') if isinstance(data, dict) else None
+        if isinstance(candidate, str) and candidate and candidate != 'unknown':
+            label = candidate
+    except (OSError, ValueError):
+        pass
+    if label is not None:
+        return {'image_id': label, 'image_id_source': 'image_label'}
+    env = os.environ.get('COFOLD_IMAGE_ID')
+    if isinstance(env, str) and env:
+        return {'image_id': env, 'image_id_source': 'env'}
+    return {'image_id': None, 'image_id_source': None,
+            'image_id_reason': 'no image label and COFOLD_IMAGE_ID unset (direct docker run)'}
+
+
+def protocol(settings, seed):
+    """Resolved settings and seed derivation for one attempt, as ESMFold2 records them."""
+    return {
+        'engine': 'boltz2',
+        'settings': asdict(settings),
+        'base_seed': seed,
+        'sample_seeds': None,
+        'sample_seeds_null_reason': ('Boltz2 draws its diffusion samples inside one native call '
+                                     'from the process RNG; no per-sample seed is constructed'),
+        'seed_formula': 'seed_everything(base_seed, workers=True) once per input x seed',
+        'engine_entry_point': 'resident.native.NativeEngine.predict -> Boltz2.predict_step',
+        'num_diffusion_samples': settings.samples,
+        'precision': 'FP32 weights with bf16 autocast',
+        'flow': ('native YAML -> boltz process_inputs -> frozen Boltz2 predict_step -> BoltzWriter'),
+    }
+
+
 def completed(output, key, identity):
+    """Reuse requires every recorded path to still hash-match; extra files are tolerated."""
     for receipt in sorted((output / 'jobs' / key).glob('*/receipt.json'), reverse=True):
         try:
             saved = json.loads(receipt.read_text())
             if saved['status'] != 'completed' or saved['identity'] != identity:
                 continue
-            if saved['sha256'] and inventory(receipt.parent) == saved['sha256']:
-                return receipt.parent
+            recorded = saved['sha256'] or {}
+            if not recorded:
+                continue
+            actual = inventory(receipt.parent)
+            if all(actual.get(path) == digest for path, digest in recorded.items()):
+                return receipt.parent, len(set(actual) - set(recorded))
         except (OSError, ValueError, KeyError):
             continue
     return None
@@ -182,10 +231,9 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
         checkpoint_hash = sha(checkpoint)
         assets_identity = asset_identity(assets)
     checkpoint_identity = {'path': str(checkpoint.resolve()), 'sha256': checkpoint_hash}
-    implementation = {'image_id': os.environ.get('COFOLD_IMAGE_ID'),
-                      'code': {str(p.relative_to(Path(__file__).parent.parent)): sha(p)
-                               for folder in ('resident', 'batch_native')
-                               for p in sorted((Path(__file__).parent.parent / folder).glob('*.py'))}}
+    implementation = dict(image_identity(), code={str(p.relative_to(Path(__file__).parent.parent)): sha(p)
+                                                  for folder in ('resident', 'batch_native')
+                                                  for p in sorted((Path(__file__).parent.parent / folder).glob('*.py'))})
     jobs = []
     for source in sources:
         source_identity = input_identity(source)
@@ -248,7 +296,9 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
             if other['input'] == job['input'] and other['status'] == 'pending':
                 prior = completed(output, other['key'], other['identity']) if resume else None
                 if prior is not None:
-                    other.update(status='completed', output=str(prior.relative_to(output)), reused=True)
+                    attempt_dir, extras = prior
+                    other.update(status='completed', output=str(attempt_dir.relative_to(output)),
+                                 reused=True, inventory_extras=extras)
                     counts['completed'] += 1
                 else:
                     other.update(status='skipped', error_kind='cuda_out_of_memory',
@@ -265,7 +315,9 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
             with benchmark.stage('resume_verification', job_key=job['key']):
                 prior = completed(output, job['key'], job['identity']) if resume else None
             if prior is not None:
-                job.update(status='completed', output=str(prior.relative_to(output)), reused=True)
+                attempt_dir, extras = prior
+                job.update(status='completed', output=str(attempt_dir.relative_to(output)),
+                           reused=True, inventory_extras=extras)
                 counts['completed'] += 1
                 save()
                 continue
@@ -288,6 +340,10 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
                 if input_identity(Path(job['input'])) != job['identity']['input']:
                     raise ValueError('input or referenced assets changed during preparation')
                 job_deadline(began, job_timeout, 'preparation')
+                # Resolved settings and the seed derivation live with the attempt,
+                # beside the receipt that hashes it.
+                atomic_json(attempt / 'protocol.json', protocol(settings, job['seed']))
+                job['protocol'] = 'protocol.json'
             except Exception as exc:
                 kind = ('timeout' if isinstance(exc, JobTimeout)
                         else 'cuda_out_of_memory' if is_cuda_oom(exc) else 'native_error')
@@ -373,29 +429,35 @@ def _run(sources, output, assets, checkpoint, seeds, settings, resume, engine_fa
     return 143 if meta['status'] == 'stopped' else (0 if meta['status'] == 'completed' else 1)
 
 
-def main():
-    parser = argparse.ArgumentParser(description='One resident Boltz2 model for native YAML inputs × explicit seeds')
+def parser():
+    """The installed worker CLI; shared flags are checked against cofolding/cli-contract.json."""
+    p = argparse.ArgumentParser(description='One resident Boltz2 model for native YAML inputs × explicit seeds')
     for name in ('input', 'output', 'assets', 'checkpoint'):
-        parser.add_argument('--' + name, required=True, type=Path)
-    parser.add_argument('--seeds', nargs='+', type=int, required=True)
-    parser.add_argument('--samples', type=int, default=1)
-    parser.add_argument('--recycles', type=int, default=3)
-    parser.add_argument('--steps', type=int, default=200)
-    parser.add_argument('--max-parallel-samples', type=int, default=1)
-    parser.add_argument('--no-kernels', action='store_true')
-    parser.add_argument('--use-potentials', action='store_true')
-    parser.add_argument('--output-format', choices=('mmcif', 'pdb'), default='mmcif')
-    parser.add_argument('--capture', choices=('full', 'none'), default='full',
-                        help="'full' writes the capture/ tensors and inventories (default); "
-                             "'none' omits them and keeps structures, confidence JSON, arrays and receipts")
-    parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
-    parser.add_argument('--job-timeout', type=float,
-                        help='wall seconds one input x seed job may take; an overrun is recorded as '
-                             "error_kind='timeout' at the next sample/job boundary and later jobs still run")
-    args = parser.parse_args()
+        p.add_argument('--' + name, required=True, type=Path)
+    p.add_argument('--seeds', nargs='+', type=int, required=True)
+    p.add_argument('--samples', type=int, default=1)
+    p.add_argument('--recycles', type=int, default=3)
+    p.add_argument('--steps', type=int, default=200)
+    p.add_argument('--max-parallel-samples', type=int, default=1)
+    p.add_argument('--no-kernels', action='store_true')
+    p.add_argument('--use-potentials', action='store_true')
+    p.add_argument('--output-format', choices=('mmcif', 'pdb'), default='mmcif')
+    p.add_argument('--capture', choices=('full', 'none'), default='full',
+                   help="'full' writes the capture/ tensors and inventories (default); "
+                        "'none' omits them and keeps structures, confidence JSON, arrays and receipts")
+    p.add_argument('--resume', action='store_true')
+    p.add_argument('--benchmark-metadata', type=Path, help='optional nonsecret allowlisted caller JSON')
+    p.add_argument('--job-timeout', type=float,
+                   help='wall seconds one input x seed job may take; an overrun is recorded as '
+                        "error_kind='timeout' at the next sample/job boundary and later jobs still run")
+    return p
+
+
+def main():
+    parser_instance = parser()
+    args = parser_instance.parse_args()
     if args.job_timeout is not None and not (math.isfinite(args.job_timeout) and args.job_timeout > 0):
-        parser.error('--job-timeout must be a positive finite number of seconds')
+        parser_instance.error('--job-timeout must be a positive finite number of seconds')
     stop = Stop()
     previous = signal.signal(signal.SIGTERM, lambda *_: setattr(stop, 'requested', True))
     try:

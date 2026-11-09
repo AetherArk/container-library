@@ -101,6 +101,16 @@ class VerifyTests(unittest.TestCase):
     def test_valid_artifacts_pass(self):
         self.verify()
 
+    def test_verification_passes_without_a_capture_directory(self):
+        import shutil
+        shutil.rmtree(self.attempt / 'capture')
+        self.verify()
+
+    def test_capture_directory_missing_its_packet_still_fails(self):
+        (self.attempt / 'capture' / 'full_result_sample_1.pt').unlink()
+        with self.assertRaisesRegex(ValueError, 'missing captured native result'):
+            self.verify()
+
     def positions_rows(self, layout):
         """Coordinate rows for {chain: residue_count}; L holds LIGAND_ELEMENTS atoms."""
         rows = []

@@ -46,6 +46,8 @@ Method-specific modules are expected. Do not copy another method's engine code.
                --samples N --steps N --recycles N [--max-parallel-samples N] \
                [--output-format mmcif|pdb] [--resume] [--benchmark-metadata PATH] [--capture full|none]
 
+The launcher adds `--estimate-attempt-bytes N` (see §9, preflight); it is not a worker flag.
+
 - Flag names and meanings are shared across methods wherever the engine allows it; the same flag
   must mean the same thing in every container.
 - `--benchmark-metadata PATH` takes a JSON file of caller metadata under a fixed, size-bounded
@@ -91,7 +93,9 @@ Identical across methods so one launcher and one reader serve all of them:
 
 Per-method additions are allowed and must be named in `SPEC.md`: ESMFold2 writes
 `chemistry.json`, `protocol.json` (resolved settings and seed formula) and
-`checkpoint-lock.json` next to the files above.
+`checkpoint-lock.json` next to the files above; Boltz2 also writes `protocol.json` (seed
+derivation, resolved settings, engine entry point). The shared flag table is
+`cofolding/cli-contract.json`, read by each container's `tests/test_cli_contract.py`.
 
 - Every JSON artifact carries an integer `schema`: `run.json`, `progress.json`, `receipt.json` and
   each `predictions.jsonl`/`events.jsonl` row. The key sets above are frozen for a given version:
@@ -139,6 +143,13 @@ Verification is an independent reader over the written files, not a trust statem
 - A completed job writes `receipt.json` with a sha256 inventory of the whole attempt.
 - `--resume` reuses a completed job only when the identity matches and every hash still matches;
   otherwise the job gets a new attempt directory and the interrupted attempt stays in place.
+- Reuse compares the recorded inventory in one direction: every path recorded in `receipt.json`
+  must still be present with the recorded hash. Extra files an operator or an inspection added are
+  tolerated and their count is recorded as `inventory_extras` on the reused job; a missing or
+  changed recorded file invalidates reuse.
+- There is no in-invocation retry and no automatic re-run of a failed job. A retry is `--resume`;
+  a resumed run that does work writes a new attempt directory and leaves the failed attempt in
+  place (§13 states the same for cloud transport).
 - A directory checkpoint is hashed once with the worker's own sorted per-file scheme, so the sweep
   and the receipt carry the same digest.
 - Exit codes, published as the full table:
@@ -195,6 +206,18 @@ The observability contract below is implemented and tested in both containers:
   verify it from two completed jobs.
 - A sweep tool rejects settings the engine cannot express instead of measuring the same work twice
   under a different label.
+- GPU exclusivity and single-writer locking are enforced, not assumed. `run_cofold.py` takes a
+  per-GPU `flock` under `--lock-root`/`COFOLD_GPU_LOCK_ROOT` plus a `flock` on
+  `OUTPUT/.runtime/launcher.lock`, and refuses a busy GPU (a held lock, an unavailable UUID or
+  active compute processes) or a second launcher on the same output directory with exit `2`. The
+  worker takes an exclusive `flock` on `OUTPUT/.worker.lock`, so a second writer on the same output
+  directory fails instead of racing `receipt.json`/`run.json`.
+- Preflight runs before any job is dispatched. With `--estimate-attempt-bytes N` the free space on
+  the output filesystem must cover `N` times the job count (native YAML inputs × seeds); `--memory`
+  must not exceed the host's available memory. Either failure exits `2` before a container starts,
+  and the message names both measured numbers. `run.json.preflight` records the estimate, the
+  measured free bytes, the job count and both memory numbers. Without the flag no estimate is
+  invented: the free space is recorded, the comparison is skipped, and the launcher says so.
 
 ## 10. Tests
 
@@ -218,6 +241,17 @@ The observability contract below is implemented and tested in both containers:
   against `assets.json`. A Hugging Face cache layout is supported and hashed by blob bytes.
 - Record the tested image tag and digest in the root `README.md` table and in the method README.
 - Audit the image before publication: no host paths, keys, `.env` files or build-machine users.
+- Caller metadata is a size-bounded allowlist, not an environment dump. `load_metadata()` and
+  `sanitize_metadata()` in `resident/benchmark.py` (both containers) read at most 16 KiB of JSON
+  and keep only provider/region/zone/machine/gpu identifiers plus `price_per_hour`; every other key
+  is dropped. No environment dumps, presigned URLs, tokens or credentials go into artifacts or logs:
+  `redact()` and `REDACT_PATTERNS` in the same module strip URL query strings, bearer/basic tokens,
+  `*TOKEN*`/`*SECRET*`/`*PASSWORD*`/`*KEY*`/`*CREDENTIAL*` `KEY=VALUE` pairs and 32+ character
+  hex/base64 blobs from `failure.json`, its traceback tail and error messages.
+- Image identity is not optional in the artifacts: `implementation.image_id` comes from the image
+  label (`ai.aetherark.cofold.image_id`, mirrored into the image at `/opt/cofold/image-label.json`)
+  first, then from the launcher-set `COFOLD_IMAGE_ID`; a direct `docker run` with neither records
+  `null` plus `image_id_reason` rather than a bare null.
 
 ## 12. Publication
 
@@ -247,6 +281,8 @@ The observability contract below is implemented and tested in both containers:
 - If provided, it is an additive wrapper around the same worker: inputs staged in object storage,
   the same image, the same receipts. The job id carries the method prefix.
 - Attempts are single-use; a spent attempt needs a freshly prepared job.
+- There is no in-invocation retry. A retry is `--resume` (or a fresh cloud job), a resumed job
+  writes a new attempt directory, and the failed attempt stays in place beside it.
 - Verify the returned archive against the receipt before accepting the attempt.
 
 ## 14. Documentation split
