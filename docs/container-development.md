@@ -69,7 +69,9 @@ The launcher adds `--estimate-attempt-bytes N` (see §9, preflight); it is not a
   seeds the process once per job and lets the engine draw its samples.
 - Repeated seeds inside one invocation are disambiguated by `seed_occurrence`.
 - Determinism claims are engine-specific. Record what is bitwise reproducible and what is not:
-  ESMFold2 reproduces PAE bitwise at a fixed seed while coordinates agree only to ~0.02 Å.
+  ESMFold2 reproduces PAE bitwise within one invocation shape at a fixed seed, while coordinates
+  agree only to ~0.02 Å; across independent invocations PAE has differed by up to 0.07 Å, so the
+  claim is a tolerance, not byte identity, and derived scores inherit that tolerance.
 
 ## 5. Output layout
 
