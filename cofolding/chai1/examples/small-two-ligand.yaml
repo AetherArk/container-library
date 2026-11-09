@@ -1,0 +1,12 @@
+version: 1
+sequences:
+- protein:
+    id: A
+    sequence: NLYIQWLKDGGPSSGRPPPS
+    msa: empty
+- ligand:
+    id: L
+    smiles: CCO
+- ligand:
+    id: M
+    smiles: CC(=O)[O-]

@@ -1,0 +1,140 @@
+"""Input capability mapping: shared YAML entities -> Chai-1's FASTA contract."""
+import unittest
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from resident.engine import capability, canonical_smiles, fasta_text, chain_letter  # noqa: E402
+
+HEME = ('Cc1c2[n-]3c(c1CCC(=O)O)C=C4C(=C(C5=[N]4[Fe+2]36[N]7=C(C=C8[N-]6C(=C5)C(=C8C)C=C)'
+        'C(=C(C7=C2)C)C=C)C)CCC(=O)O')
+TRPCAGE = 'NLYIQWLKDGGPSSGRPPPS'
+
+
+def system(*entities):
+    return {'version': 1, 'sequences': list(entities)}
+
+
+def protein(sequence=TRPCAGE, id='A', **extra):
+    return {'protein': dict(id=id, sequence=sequence, **extra)}
+
+
+def ligand(smiles='CCO', id='L'):
+    return {'ligand': dict(id=id, smiles=smiles)}
+
+
+class CapabilityTests(unittest.TestCase):
+    def test_protein_with_one_ligand(self):
+        resolved = capability(system(protein(), ligand()), 'x.yaml')
+        self.assertEqual([c['id'] for c in resolved['proteins']], ['A'])
+        self.assertEqual(resolved['proteins'][0]['sequence'], TRPCAGE)
+        self.assertEqual(resolved['ligands'][0]['smiles'], 'CCO')
+
+    def test_two_protein_chains_accepted(self):
+        resolved = capability(system(protein(), protein(id='B'), ligand()), 'zika.yaml')
+        self.assertEqual([c['id'] for c in resolved['proteins']], ['A', 'B'])
+
+    def test_multiple_ligands_accepted(self):
+        resolved = capability(system(protein(), ligand('CCO', 'L'), ligand('CCN', 'M'),
+                                     ligand(HEME, 'H')), 'multi.yaml')
+        self.assertEqual([c['id'] for c in resolved['ligands']], ['L', 'M', 'H'])
+
+    def test_heme_is_an_ordinary_ligand(self):
+        resolved = capability(system(protein(), ligand(HEME, 'B'), ligand('CCN', 'L')), 'cyp.yaml')
+        self.assertEqual([c['id'] for c in resolved['ligands']], ['B', 'L'])
+        self.assertEqual(canonical_smiles(HEME)[1]['iron_atoms'], 1)
+
+    def test_apo_is_accepted(self):
+        # Chai-1 can fold a protein-only system; ESMFold2 cannot.  This is a recorded
+        # capability superset, not a silent difference.
+        resolved = capability(system(protein()), 'apo.yaml')
+        self.assertEqual(resolved['ligands'], [])
+
+    def test_duplicate_protein_chain_id_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'chain ids must be unique'):
+            capability(system(protein(), protein(id='A'), ligand()), 'duplicate.yaml')
+
+    def test_chain_id_colliding_with_ligand_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'unique across proteins and ligands'):
+            capability(system(protein(), ligand(id='A')), 'collision.yaml')
+
+    def test_msa_file_rejected_but_empty_allowed(self):
+        capability(system(protein(msa='empty'), ligand()), 'ok.yaml')
+        with self.assertRaisesRegex(ValueError, 'without MSA'):
+            capability(system(protein(msa='../msa.a3m'), ligand()), 'msa.yaml')
+
+    def test_affinity_rejected(self):
+        document = system(protein(), ligand())
+        document['properties'] = [{'affinity': {'binder': 'L'}}]
+        with self.assertRaisesRegex(ValueError, 'affinity'):
+            capability(document, 'affinity.yaml')
+
+    def test_templates_and_constraints_rejected(self):
+        for field in ('templates', 'constraints'):
+            document = system(protein(), ligand())
+            document[field] = [{'x': 1}]
+            with self.assertRaisesRegex(ValueError, field):
+                capability(document, field + '.yaml')
+
+    def test_noncanonical_sequence_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'canonical uppercase'):
+            capability(system(protein('NLYIQX'), ligand()), 'bad.yaml')
+
+    def test_seeds_inside_yaml_rejected(self):
+        document = system(protein(), ligand())
+        document['seed'] = 3
+        with self.assertRaisesRegex(ValueError, 'external --seeds'):
+            capability(document, 'seed.yaml')
+
+    def test_modifications_and_ccd_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'modified or cyclic'):
+            capability(system(protein(modifications=[{'x': 1}]), ligand()), 'mod.yaml')
+        with self.assertRaisesRegex(ValueError, 'CCD ligand references'):
+            capability(system(protein(), {'ligand': {'id': 'L', 'ccd': 'HEM'}}), 'ccd.yaml')
+
+    def test_rna_is_rejected_by_name(self):
+        with self.assertRaisesRegex(ValueError, 'unsupported entity type rna'):
+            capability(system(protein(), {'rna': {'id': 'R', 'sequence': 'ACGU'}}), 'rna.yaml')
+
+    def test_chemistry_record_preserves_consumed_state(self):
+        molecule, chemistry = canonical_smiles('OCC')
+        self.assertEqual(chemistry['consumed_smiles'], 'OCC')
+        self.assertEqual(chemistry['canonical_smiles'], 'CCO')
+        self.assertEqual(chemistry['heavy_atoms'], 3)
+        self.assertEqual(chemistry['iron_atoms'], 0)
+        self.assertIn('no neutralization', chemistry['state_policy'])
+
+    def test_unparseable_smiles_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'does not parse'):
+            capability(system(protein(), ligand('not-a-smiles')), 'bad-ligand.yaml')
+
+    def test_fasta_headers_and_chain_letters(self):
+        prepared = {'entities': [{'id': 'A', 'kind': 'protein', 'sequence': 'AGS'},
+                                 {'id': 'L', 'kind': 'ligand', 'smiles': 'CO'}]}
+        self.assertEqual(fasta_text(prepared), '>protein|A\nAGS\n>ligand|L\nCO\n')
+        self.assertEqual([chain_letter(i) for i in (1, 2)], ['A', 'B'])
+        self.assertEqual(chain_letter(26), 'Z')
+        self.assertEqual(chain_letter(27), 'a')
+        self.assertEqual(chain_letter(53), 'AA')
+
+    def test_packaged_examples_match_engine_capability(self):
+        import yaml
+        examples = ROOT / 'examples'
+        supported, rejected = [], {}
+        for path in sorted(examples.glob('*.yaml')):
+            document = yaml.safe_load(path.read_text())
+            try:
+                resolved = capability(document, path.name)
+                supported.append((path.stem, resolved))
+            except ValueError as error:
+                rejected[path.stem] = str(error)
+        names = [name for name, _ in supported]
+        self.assertEqual(sorted(names), ['small-two-ligand', 'trpcage-ethanol', 'two-chain'], rejected)
+        self.assertEqual(len(dict(supported)['trpcage-ethanol']['ligands']), 1)
+        self.assertEqual(len(dict(supported)['small-two-ligand']['ligands']), 2)
+
+
+if __name__ == '__main__':
+    unittest.main()

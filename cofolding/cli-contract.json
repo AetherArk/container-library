@@ -3,10 +3,18 @@
   "description": "Shared cofold worker/launcher CLI contract. Every container's tests/test_cli_contract.py reads this file and fails when a flag marked 'supported' or 'rejected' is missing from the installed argparse parser or advertises a different domain. Status values are exactly supported, rejected and unknown: 'supported' means every value in the domain is accepted; 'rejected' means the flag is not accepted at all, or only the values in container_domain are accepted; 'unknown' means no per-container decision has been made.",
   "output_format_decision": {
     "decision": "The worker accepts mmcif only; cif was removed.",
-    "reason": "run_cofold.py allows mmcif|pdb, so --output-format cif at the ESMFold2 worker was unreachable through the launcher while duplicating mmcif byte for byte. Every value either container accepts is now reachable through the shared launcher: mmcif and pdb for Boltz2, mmcif for ESMFold2, with pdb rejected by name because ESMFold2 writes mmCIF only.",
+    "reason": "run_cofold.py allows mmcif|pdb, so --output-format cif at the ESMFold2 worker was unreachable through the launcher while duplicating mmcif byte for byte. Every value each container accepts is now reachable through the shared launcher: mmcif and pdb for Boltz2, mmcif for ESMFold2 and Chai-1, with pdb rejected by name because those engines write mmCIF only.",
     "containers": {
-      "boltz2": ["mmcif", "pdb"],
-      "esmfold2": ["mmcif"]
+      "boltz2": [
+        "mmcif",
+        "pdb"
+      ],
+      "esmfold2": [
+        "mmcif"
+      ],
+      "chai1": [
+        "mmcif"
+      ]
     }
   },
   "flags": {
@@ -14,133 +22,251 @@
       "required": true,
       "type": "path",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--output": {
       "required": true,
       "type": "path",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--assets": {
       "required": true,
       "type": "path",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--checkpoint": {
       "required": true,
       "type": "path",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--seeds": {
       "required": true,
       "type": "int-list",
       "domain": "uint32",
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--samples": {
       "required": false,
       "type": "int",
       "domain": "positive",
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--recycles": {
       "required": false,
       "type": "int",
       "domain": "non-negative",
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--steps": {
       "required": false,
       "type": "int",
       "domain": "positive",
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--max-parallel-samples": {
       "required": false,
       "type": "int",
       "domain": "positive",
-      "container_domain": {"boltz2": "positive", "esmfold2": ["1"]},
-      "containers": {"boltz2": "supported", "esmfold2": "rejected"},
+      "container_domain": {
+        "boltz2": "positive",
+        "esmfold2": [
+          "1"
+        ],
+        "chai1": [
+          "1"
+        ]
+      },
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "rejected",
+        "chai1": "rejected"
+      },
       "reason": {
-        "esmfold2": "ESMFold2 folds one trajectory per native call; a value above 1 is refused by the parser before inference."
+        "esmfold2": "ESMFold2 folds one trajectory per native call; a value above 1 is refused by the parser before inference.",
+        "chai1": "Chai-1 folds one sample per native call; a value above 1 is refused by the parser before inference."
       }
     },
     "--no-kernels": {
       "required": false,
       "type": "flag",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "rejected"
+      },
+      "reason": {
+        "chai1": "chai_lab 0.6.1 exposes no fused/reference kernel switch; the flag has no Chai-1 equivalent."
+      }
     },
     "--use-potentials": {
       "required": false,
       "type": "flag",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "rejected"},
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "rejected",
+        "chai1": "rejected"
+      },
       "reason": {
-        "esmfold2": "No ESMFold2 equivalent; the capability is not part of that engine."
+        "esmfold2": "No ESMFold2 equivalent; the capability is not part of that engine.",
+        "chai1": "No Chai-1 equivalent; the capability is not part of that engine."
       }
     },
     "--backend": {
       "required": false,
       "type": "enum",
-      "domain": ["fused", "reference"],
-      "containers": {"boltz2": "unknown", "esmfold2": "supported"}
+      "domain": [
+        "fused",
+        "reference"
+      ],
+      "containers": {
+        "boltz2": "unknown",
+        "esmfold2": "supported",
+        "chai1": "rejected"
+      },
+      "reason": {
+        "chai1": "chai_lab 0.6.1 exposes no selectable kernel backend; the flag is not accepted."
+      }
     },
     "--loops": {
       "required": false,
       "type": "int",
       "domain": "non-negative",
-      "containers": {"boltz2": "unknown", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "unknown",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--output-format": {
       "required": false,
       "type": "enum",
-      "domain": ["mmcif", "pdb"],
-      "container_domain": {"boltz2": ["mmcif", "pdb"], "esmfold2": ["mmcif"]},
-      "containers": {"boltz2": "supported", "esmfold2": "rejected"},
+      "domain": [
+        "mmcif",
+        "pdb"
+      ],
+      "container_domain": {
+        "boltz2": [
+          "mmcif",
+          "pdb"
+        ],
+        "esmfold2": [
+          "mmcif"
+        ],
+        "chai1": [
+          "mmcif"
+        ]
+      },
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "rejected",
+        "chai1": "rejected"
+      },
       "reason": {
-        "esmfold2": "ESMFold2 writes mmCIF only; pdb is refused with an explicit message. cif is not a shared value and was removed from the worker."
+        "esmfold2": "ESMFold2 writes mmCIF only; pdb is refused with an explicit message. cif is not a shared value and was removed from the worker.",
+        "chai1": "Chai-1 writes mmCIF only; pdb is refused with an explicit message."
       }
     },
     "--capture": {
       "required": false,
       "type": "enum",
-      "domain": ["full", "none"],
-      "containers": {"boltz2": "supported", "esmfold2": "rejected"},
+      "domain": [
+        "full",
+        "none"
+      ],
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "rejected",
+        "chai1": "rejected"
+      },
       "reason": {
-        "esmfold2": "The ESMFold2 container writes capture/ unconditionally and has no opt-out flag (container-development.md section 16); --capture is not accepted."
+        "esmfold2": "The ESMFold2 container writes capture/ unconditionally and has no opt-out flag (container-development.md section 16); --capture is not accepted.",
+        "chai1": "The Chai-1 container writes its native arrays unconditionally and has no opt-out flag; --capture is not accepted."
       }
     },
     "--derived": {
       "required": false,
       "type": "enum",
-      "domain": ["none", "tensors"],
-      "containers": {"boltz2": "supported", "esmfold2": "supported"},
+      "domain": [
+        "none",
+        "tensors"
+      ],
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      },
       "reason": {
         "boltz2": "Default 'tensors' scores the written PAE with the shared ipSAE module and writes metrics/derived.json before capture may be dropped; works with --capture none.",
-        "esmfold2": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected."
+        "esmfold2": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected.",
+        "chai1": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected."
       }
     },
     "--resume": {
       "required": false,
       "type": "flag",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--benchmark-metadata": {
       "required": false,
       "type": "path",
       "domain": null,
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     },
     "--job-timeout": {
       "required": false,
       "type": "float",
       "domain": "positive finite seconds",
-      "containers": {"boltz2": "supported", "esmfold2": "supported"}
+      "containers": {
+        "boltz2": "supported",
+        "esmfold2": "supported",
+        "chai1": "supported"
+      }
     }
   }
 }
