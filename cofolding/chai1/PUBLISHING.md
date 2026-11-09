@@ -48,3 +48,15 @@ README table marks this method as not yet published.
    an `sm_120` card.
 2. Verify `fetch_assets.py --download` then `--offline` on the same directory.
 3. Record the measured memory peak for the packaged examples in TESTING.md.
+
+## 0.6.1-worker-rc1
+
+Digest `sha256:42c9f2ebab68555daaa2b5d5604c42cfc14a6476000c6cdc566dd5895573d08e`, published by workflow run 42617982261 from the merge of
+PR #27 (`b3f6ce7`). First publication of this container, and the first to exercise chai_lab 0.6.1
+under torch 2.11.0+cu130 with the shared `cofolding/common` build context.
+
+Accepted locally from the published digest on a 16 GB RTX 5070 Ti: pulled anonymously, run through
+`run_cofold.py` on the Trp-cage + ethanol example at seed 11, one sample. `completed`;
+`run.json.implementation.image_id` reports the published digest from the image label; the job wrote
+`metrics/derived.json` with A/B `ipsae` 0.365472, `ipsae21` 0.012205, `n0` 3 / 7 — inside the
+run-to-run tolerance recorded in TESTING.md.
