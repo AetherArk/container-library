@@ -24,7 +24,7 @@
 
 - Clone: `git clone https://github.com/AetherArk/container-library.git`; enter `container-library` and check out the commit containing this worker.
 - Host environment: `python3 -m venv .venv && .venv/bin/pip install -r cofolding/boltz2/requirements-host.txt`.
-- Build: `docker build --build-arg CONTAINER_REVISION="$(git rev-parse HEAD)" -t container-library/boltz2:2.2.1-worker-v4-observability-rc1 cofolding/boltz2`.
+- Build: `docker build --build-context common=cofolding/common --build-arg CONTAINER_REVISION="$(git rev-parse HEAD)" -t container-library/boltz2:2.2.1-worker-v4-observability-rc1 cofolding/boltz2`. The named `common` context installs `cofolding/common` at `/opt/cofold/cofolding/common` so the worker can import the shared numpy-only interface-scoring module.
 - Assets: `.venv/bin/python cofolding/boltz2/fetch_assets.py --cache /path/to/cache --download`.
 - [Weights/data](https://huggingface.co/boltz-community/boltz-2): public; downloader verifies pinned files and extracts chemical-component data. Download: 6.2 GB, including affinity weights; allow additional extraction/image/output space.
 - Inference is offline. Weights remain external; use trusted checkpoints/output files.

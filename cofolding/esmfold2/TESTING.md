@@ -157,3 +157,33 @@ GPU 1 with Trp-cage/ethanol, seed 11, one sample:
   `image_id_reason` when neither exists.
 - Not tested here: the Dockerfile image-label mirror is exercised only by an image build, which this
   batch does not perform.
+
+## Derived interface metrics (`--derived`, 2026-11-09)
+
+- CPU: `/home/dan/swr/miniconda3/envs/cheminf/bin/python -m unittest discover -s cofolding/esmfold2/tests`
+  ran 139 tests, 2 skipped, OK (4 new `tests/test_derived.py`, 4 new `tests/test_token_map.py`).
+  The token-map tests use synthetic `ProteinInput`/`LigandInput` objects and a synthetic complex:
+  one PAE token per protein residue, one per ligand heavy atom, per-chain `entity_id` contiguity
+  checked, and PAE-size/chain-count mismatches refused with `TokenMapError`.
+- Shared module: `cofolding/common/tests` ran 29 tests, OK (5 new `test_derived.py`).
+- Image `container-library/esmfold2:ipsae-derived-final`, ID
+  `sha256:9aab252eb520d8539b72d8c72c2cb99f4574b200d7ff46c1d436352d991674a8`, built with
+  `--build-context common=cofolding/common`; `cofolding.common` imports without torch.
+- GPU 1 (RTX 5070 Ti), seed 11, one sample, 200 steps, through `run_cofold.py`:
+  - `examples/two-chain.yaml` (`/home/dan/cofold-runs/ipsae-final2/esm-twochain/out`): completed,
+    one checkpoint load; token map `native/tokens_two-chain_sample_1.json` has 43 tokens
+    (A 20, B 20, L 3 heavy atoms), pair A-B at cutoff 10 ipsae 0.0491013612, n0 20/20, d0 1.0/1.0.
+  - `examples/trpcage-ethanol.yaml` (`/home/dan/cofold-runs/ipsae-final2/esm-trpcage/out`):
+    completed, one load, one A-L pair (23 tokens).
+  - `--derived none` on the same Trp-cage input
+    (`/home/dan/cofold-runs/ipsae-final2/esm-trpcage-none/out`): completed, one load, no
+    `metrics/derived.json`, `disabled_by_--derived_none` recorded.
+- `--capture` remains rejected for this container (it always writes `capture/`); derivation is
+  independent of `capture/`, it reads `native/pae_<rid>_sample_<n>.npz` and the token map beside it.
+- Reference cross-check on the container's own CIF and PAE for A-B
+  (`/home/dan/cofold-runs/ipsae-final2/esm-twochain/out/crosscheck.txt`): IPSAE2 df6e46f2
+  (full-precision API) matched every column exactly (0.0 difference for `ipsae`, `ipsae12`,
+  `ipsae21`, `iPAE12/21`, `n0`, `d0` at cutoffs 10 and 15); IPSAE 6174cf9e matched `ipSAE`,
+  `ipSAE_d0chn`, `ipTM_d0chn`, `n0chn/n0dom` and `d0chn/d0dom`; worst absolute difference was
+  3.612e-07 (limited by the reference TSV's six-decimal print), well under the 1e-5 gate.
+- No registry publication; the image is local and the change is uncommitted.

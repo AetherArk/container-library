@@ -225,6 +225,10 @@ def parser():
             p.add_argument(flag, action='store_true')
         elif type(value) is int:
             p.add_argument(flag, type=int, default=value)
+        elif key == 'capture':
+            p.add_argument(flag, choices=('full', 'none'), default=value)
+        elif key == 'derived':
+            p.add_argument(flag, choices=('none', 'tensors'), default=value)
         else:
             p.add_argument(flag, choices=('mmcif', 'pdb'), default=value)
     return p

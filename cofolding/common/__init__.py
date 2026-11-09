@@ -6,5 +6,8 @@ dropped.
 """
 
 from .ipsae import compute_interface_scores
+from .derived import (CUTOFFS, FORMULAS, SCHEMA, TokenMapError, read_token_map,
+                      score, write_derived)
 
-__all__ = ["compute_interface_scores"]
+__all__ = ["compute_interface_scores", "CUTOFFS", "FORMULAS", "SCHEMA",
+           "TokenMapError", "read_token_map", "score", "write_derived"]

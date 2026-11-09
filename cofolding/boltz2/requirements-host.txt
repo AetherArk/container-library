@@ -1,1 +1,5 @@
+# Host-only test dependencies; never installed into the prediction image.
 PyYAML>=6.0.1,<7
+# The shared interface-scoring module shipped in both images is numpy-only, so its
+# tests must run where the module can be imported.
+numpy>=2,<3

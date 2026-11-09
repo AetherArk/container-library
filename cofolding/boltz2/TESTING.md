@@ -98,3 +98,32 @@ launcher tests.
   bytes are recorded, the comparison is skipped and the launcher says so.
 - Not tested here: the Dockerfile image-label mirror is exercised only by an image build, which this
   batch does not perform.
+
+## Derived interface metrics (`--derived`, 2026-11-09)
+
+- CPU: `cofolding/boltz2/.venv/bin/python -m unittest discover -s cofolding/boltz2/tests`
+  ran 142 tests, 2 skipped, OK (4 new in `tests/test_derived.py`); the shared `tests/` suite ran
+  37 tests, OK. No GPU, checkpoint, build or network use.
+- `tests/test_derived.py` uses a fake engine and a synthetic PAE + token map: `metrics/derived.json`
+  carries schema 1, the three formula ids, cutoffs 10/15, one pair entry with `ipsae`, `iptm_d0chn`,
+  `ipae12/21`, `n0` and `d0`; a missing or malformed token map is a recorded skip with `pairs: null`;
+  `--derived none` writes no `metrics/` and records `disabled_by_--derived_none` in the receipt and
+  `predictions.jsonl`.
+- Image `container-library/boltz2:ipsae-derived-final`, ID
+  `sha256:22e0da50d565f9b29af9fd86e7b10e016838387f27fb7cfb203de8f6fa896611`, built with
+  `--build-context common=cofolding/common`; `cofolding.common` imports from
+  `/opt/cofold/cofolding/common` without torch.
+- GPU 1 (RTX 5070 Ti, `GPU-a3d96ffd-0387-fe9f-1c5c-9003ef4fbb47`), Trp-cage/ethanol, seed 11, one
+  sample, three recycles, 200 steps, `--no-kernels`, through `run_cofold.py`:
+  - `--capture full --derived tensors`: `/home/dan/cofold-runs/ipsae-final2/boltz-full/out`,
+    completed, one checkpoint load, `metrics/derived.json` in the receipt inventory; PAE source
+    `capture/full_prediction.pt`; token map `tokens.json` (23 tokens: A protein 20, L ligand 3,
+    atom names C8/C9/O7) plus an identical `capture/tokens.json`; pair A-L, cutoff 10 ipsae
+    0.5616587516, n0 3/19, d0 2.0/1.0.
+  - `--capture none --derived tensors`:
+    `/home/dan/cofold-runs/ipsae-final2/boltz-none/out`, completed, one load, no `capture/`,
+    PAE source `prediction_summary.pt`, same derived values as the capture-full run.
+  - `--derived none`: `/home/dan/cofold-runs/ipsae-final2/boltz-derived-none/out`, completed, one
+    load, no `metrics/derived.json`, receipt and `predictions.jsonl` say
+    `disabled_by_--derived_none`.
+- No registry publication; the image is local and the change is uncommitted.

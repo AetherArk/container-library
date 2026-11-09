@@ -6,8 +6,8 @@
 
 ## Build
 
-- Boltz2: `docker build -t container-library/boltz2:single-load-dev cofolding/boltz2`.
-- ESMFold2: `docker build -t container-library/esmfold2:dev cofolding/esmfold2` (CUDA 13 devel
+- Boltz2: `docker build --build-context common=cofolding/common -t container-library/boltz2:single-load-dev cofolding/boltz2`.
+- ESMFold2: `docker build --build-context common=cofolding/common -t container-library/esmfold2:dev cofolding/esmfold2` (CUDA 13 devel
   base; the transformer-engine build dominates the time).
 - Development tags only; preserve the released image tags.
 

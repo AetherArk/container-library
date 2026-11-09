@@ -114,6 +114,16 @@
         "esmfold2": "The ESMFold2 container writes capture/ unconditionally and has no opt-out flag (container-development.md section 16); --capture is not accepted."
       }
     },
+    "--derived": {
+      "required": false,
+      "type": "enum",
+      "domain": ["none", "tensors"],
+      "containers": {"boltz2": "supported", "esmfold2": "supported"},
+      "reason": {
+        "boltz2": "Default 'tensors' scores the written PAE with the shared ipSAE module and writes metrics/derived.json before capture may be dropped; works with --capture none.",
+        "esmfold2": "Default 'tensors' scores each written sample's PAE against its token map and writes metrics/derived.json; capture/ is unaffected."
+      }
+    },
     "--resume": {
       "required": false,
       "type": "flag",

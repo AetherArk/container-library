@@ -553,6 +553,7 @@ class ArchiveTests(unittest.TestCase):
         docker = (ROOT/'Dockerfile').read_text()
         self.assertIn('cloud_job.py /opt/cofold/', docker)
         self.assertIn('cofold-cloud-run /opt/cofold/', docker)
+        self.assertIn('COPY --from=common . /opt/cofold/cofolding/common', docker)
         self.assertIn('ENTRYPOINT ["cofold-run"]', docker)
         self.assertIn('CMD ["--help"]', docker)
         ignore = (ROOT/'.dockerignore').read_text().splitlines()

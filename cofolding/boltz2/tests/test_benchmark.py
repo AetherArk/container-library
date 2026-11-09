@@ -218,12 +218,15 @@ class BenchmarkTests(unittest.TestCase):
                      'atomic_json': lambda *args: None, 'save_packet': packet,
                      'timed_forward': bench.timed_forward, 'seed_everything': lambda *a, **kw: None,
                      'native_boundary': lambda call: call,
-                     'BoltzWriter': Writer, 'gc': types.SimpleNamespace(collect=lambda: None)}
+                     'BoltzWriter': Writer, 'gc': types.SimpleNamespace(collect=lambda: None),
+                     'Path': Path, 'save_token_map': lambda *a, **kw: None,
+                     'token_map': lambda *a, **kw: {},
+                     'derived': types.SimpleNamespace(TokenMapError=ValueError)}
         exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
         engine = types.SimpleNamespace(model=Model(), load_args={}, settings=Settings())
         with tempfile.TemporaryDirectory() as directory, patch.object(bench.time, 'perf_counter', side_effect=lambda: clock[0]):
             root = Path(directory)
-            prepared = {'batch': {}, 'processed': root, 'native': root,
+            prepared = {'batch': {}, 'data': {}, 'processed': root, 'native': root,
                         'module': types.SimpleNamespace(transfer_batch_to_device=lambda batch, *a: batch)}
             namespace['predict'](engine, prepared, root, 11)
         metrics = engine.benchmark_metrics
