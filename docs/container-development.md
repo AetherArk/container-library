@@ -303,3 +303,65 @@ started; each follows this document.
 - OpenDDE.
 - Chai-1.
 - RosettaFold3.
+
+## 18. Planned additions: shared frontend and derived metrics
+
+Not implemented. Both are wanted; the notes below fix the intent and the known traps so the next
+container does not invent its own answer.
+
+### 18.1 One canonical input, per-method converters
+
+Today every container parses its own YAML. The target is a single canonical description of a
+prediction request — entities, sequences, MSAs, ligands, ions, modifications, covalent bonds and
+interface constraints — plus a converter per method that maps it to the engine's native input.
+
+- Canonical schema: versioned (`version: 1`), one JSON Schema and one Python module in the
+  repository, with entities typed `protein`, `dna`, `rna`, `ligand`, `ion`; a ligand is SMILES or a
+  CCD code; an MSA is a file, an inline alignment, or the explicit literal `none`.
+- Converter per method, named `frontends/<method>.py`, producing the native input the engine already
+  reads. Native inputs remain supported: the canonical route is an addition, not a replacement.
+- Capability declaration per container, readable without a GPU (`cofold-capability --json`):
+  which entity types, which MSA modes, which constraint kinds, which output formats. The frontend
+  rejects an unsupported request before a job is dispatched rather than silently degrading it, as
+  §3 already requires for flags.
+- Identity covers both sides: the canonical request hash and the converter version are recorded in
+  the attempt beside the converted native input, so a change in either is visible after the fact.
+- One conformance fixture per capability is exercised in CI by every container: the same canonical
+  file is accepted where declared and rejected with a specific message where not.
+
+The traps to design against: a canonical schema that quietly becomes the lowest common denominator
+and hides a method's real features; MSA handling, which differs most between methods (Boltz2 consumes
+alignments, ESMFold2 requires `msa: none`); and constraints, where pocket residues, contacts and
+covalent bonds have different native semantics. Capability negotiation is what keeps the shared
+frontend honest.
+
+### 18.2 Derived metrics computed inside the container
+
+The tensors a container already writes support scores that downstream work keeps recomputing by
+hand. Compute them once, where the arrays and the provenance are, and write them beside the rest.
+
+- `metrics/derived.json` per attempt, plus an `.npz` when an array is needed, with a `formula`
+  identifier and version per metric and references to the arrays it consumed. Readers never
+  recompute; a formula change gets a new version rather than a silent revision.
+- ipSAE, from the PAE matrix: directional scores per chain pair with a PAE cutoff (10 and 15 Å kept
+  as recorded settings), `d0` from the residues that pass the cutoff with the 1 Å floor, the two
+  variants `ipSAE_d0chn` and `ipSAE_d0dom`, and the reported value as the maximum of the two
+  directions. Extended forms for ligand, nucleic-acid and ion pairs follow the published
+  definitions (fixed `d0 = 2 Å`, no cutoff for ligands) and are versioned separately from the
+  protein-protein definition.
+- Interface descriptors that are unambiguous from the written files: interface residue sets at a
+  5 Å heavy-atom contact, interface PAE statistics, per-chain-pair ipTM recomputed from PAE when the
+  engine reports only the symmetric value, pDockQ and pDockQ2 from pLDDT plus PAE.
+- Structure-only geometry from the coordinates: buried solvent-accessible area, contact and clash
+  counts, radius of gyration, ligand contact shell.
+- Explicitly out: anything needing a reference structure (DockQ, lDDT, RMSD to native). Those belong
+  to evaluation, not prediction.
+
+Two correctness requirements come before any of this. PAE is directional — row and column mean
+different things — so the axis convention must be written down and preserved rather than
+symmetrized. And PAE rows are indexed by model tokens, not residues, so scoring needs an explicit
+token-to-residue map for ligands and ions; using token indices as residue indices would silently
+change every ligand score.
+
+- `--derived none|basic|full` mirrors §6: `basic` is the default and costs no measurable time;
+  `none` writes only the arrays; `full` adds the geometry work.
