@@ -52,3 +52,15 @@ README table marks this method as not yet published.
    architecture exactly).
 4. Verify `fetch_assets.py --download` then `--offline` on the same directory.
 5. Record the measured memory peak for the packaged examples in TESTING.md.
+
+## 2.0.0-worker-rc1
+
+Digest `sha256:89f714e896561ab958d3c1f351b49918501c371f5a5553692b4030be2e7d0c00`, published by workflow run 42646391367 from the merge of PR #29
+(`8f38598`). First publication of this container.
+
+Accepted locally from the published digest on a 16 GB RTX 5070 Ti: pulled anonymously, run through
+`run_cofold.py` on the Trp-cage + ethanol example at seed 11, one sample, ten recycles, 200 steps.
+`completed`; `run.json.implementation.image_id` reports the published digest from the image label;
+the job wrote `metrics/derived.json` with A/B `ipsae` 0.777643, `ipsae21` 0.057200, `n0` 3 / 20.
+The local build of the same commit gave 0.777462 / 0.057346, so the published image agrees within the
+same run-to-run tolerance seen for the ESMFold2 and Chai-1 containers.
