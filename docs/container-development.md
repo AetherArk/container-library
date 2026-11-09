@@ -335,33 +335,46 @@ alignments, ESMFold2 requires `msa: none`); and constraints, where pocket residu
 covalent bonds have different native semantics. Capability negotiation is what keeps the shared
 frontend honest.
 
-### 18.2 Derived metrics computed inside the container
+### 18.2 Derived metrics: only what the large tensors are needed for
 
-The tensors a container already writes support scores that downstream work keeps recomputing by
-hand. Compute them once, where the arrays and the provenance are, and write them beside the rest.
+The rule is a cost rule, not a convenience rule. Compute a metric inside the container only if it
+needs one of the large per-sample tensors that would otherwise have to be stored or transferred to
+compute it. Everything computable from the coordinates and the small confidence files belongs
+outside the container, on CPU, asynchronously: it is cheap there, it does not lengthen a paid GPU
+job, and it can be changed and re-run without re-predicting.
 
-- `metrics/derived.json` per attempt, plus an `.npz` when an array is needed, with a `formula`
-  identifier and version per metric and references to the arrays it consumed. Readers never
-  recompute; a formula change gets a new version rather than a silent revision.
-- ipSAE, from the PAE matrix: directional scores per chain pair with a PAE cutoff (10 and 15 Å kept
-  as recorded settings), `d0` from the residues that pass the cutoff with the 1 Å floor, the two
-  variants `ipSAE_d0chn` and `ipSAE_d0dom`, and the reported value as the maximum of the two
-  directions. Extended forms for ligand, nucleic-acid and ion pairs follow the published
-  definitions (fixed `d0 = 2 Å`, no cutoff for ligands) and are versioned separately from the
-  protein-protein definition.
-- Interface descriptors that are unambiguous from the written files: interface residue sets at a
-  5 Å heavy-atom contact, interface PAE statistics, per-chain-pair ipTM recomputed from PAE when the
-  engine reports only the symmetric value, pDockQ and pDockQ2 from pLDDT plus PAE.
-- Structure-only geometry from the coordinates: buried solvent-accessible area, contact and clash
-  counts, radius of gyration, ligand contact shell.
-- Explicitly out: anything needing a reference structure (DockQ, lDDT, RMSD to native). Those belong
-  to evaluation, not prediction.
+Large tensors are the per-token PAE matrix (N x N, and the PDE matrix the same shape), and any
+embedding or attention dump. In `--capture none` mode these are exactly what is deleted, so a metric
+that depends on them is either computed before they are dropped or not computed at all.
 
-Two correctness requirements come before any of this. PAE is directional — row and column mean
-different things — so the axis convention must be written down and preserved rather than
-symmetrized. And PAE rows are indexed by model tokens, not residues, so scoring needs an explicit
-token-to-residue map for ligands and ions; using token indices as residue indices would silently
-change every ligand score.
+Inside the container, at write time:
 
-- `--derived none|basic|full` mirrors §6: `basic` is the default and costs no measurable time;
-  `none` writes only the arrays; `full` adds the geometry work.
+- ipSAE, from the PAE matrix: directional scores per chain pair at the recorded PAE cutoff (10 and
+  15 Å kept as settings), `d0` from the residues passing the cutoff with the 1 Å floor, the
+  `ipSAE_d0chn` and `ipSAE_d0dom` variants, and the reported value as the maximum of the two
+  directions. Ligand, nucleic-acid and ion pairs follow the published extension (fixed `d0 = 2 Å`,
+  no cutoff for ligands) and carry their own formula version.
+- Interface PAE statistics per chain pair: distribution and per-residue summaries at the interface,
+  which require the full matrix rather than a diagonal.
+- Per-chain-pair ipTM recomputed from PAE where an engine reports only the symmetric value.
+- pDockQ2, whose interface term needs PAE.
+
+Outside the container, from the coordinates and the small confidence files (asynchronous, CPU):
+interface residue sets at a contact cutoff, buried SASA, contact and clash counts, radius of
+gyration, ligand contact shell, pDockQ, pLDDT summaries, and anything else derived from the CIF plus
+the confidence JSON. Reference-dependent metrics (DockQ, lDDT, RMSD to native) stay in evaluation.
+
+Output shape: `metrics/derived.json` per attempt, plus an `.npz` only when a per-residue array is
+genuinely needed downstream. Each metric carries a `formula` identifier and version and references
+the tensor it consumed, so a reader can tell which matrix produced it and a formula change becomes a
+version, not a silent revision. The file is small by construction; if it grows past a few kilobytes,
+the metric belongs outside.
+
+Two correctness requirements come first. PAE is directional — row and column mean different things —
+so the axis convention must be written down and preserved rather than symmetrized. And PAE rows are
+indexed by model tokens, not residues, so scoring needs an explicit token-to-residue map for
+ligands and ions; using token indices as residue indices would silently change every ligand score.
+
+- `--derived none|tensors|full` mirrors §6: `tensors` is the default and covers the list above;
+  `none` writes only the arrays; `full` is reserved for a method whose engine cannot expose the
+  matrix separately from other work.
