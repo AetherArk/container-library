@@ -87,8 +87,13 @@ the engine's own `fold()` defaults. `protocol.json` records both the keyword arg
 sets (`num_loops`, `num_sampling_steps`, `num_diffusion_samples`, `seed`, `include_embeddings`,
 `complex_id`) and the native defaults it inherits (`noise_scale`, `lm_dropout=0.3`, and the rest).
 The process RNG is seeded with the sample seed before every native call, because `fold()` applies
-LM dropout at inference when `lm_dropout > 0`. Measured on GPU: with a fixed seed, PAE is bitwise
-identical across runs; coordinates agree to within 0.02 Angstrom but are not bitwise identical,
+LM dropout at inference when `lm_dropout > 0`. Measured on GPU: with a fixed seed and the same
+invocation shape, PAE is bitwise identical across runs; coordinates agree to within 0.02 Angstrom
+but are not bitwise identical. Across independent invocations the model is not bitwise
+reproducible: two runs of the same two-chain input at seed 11, with identical weights, differed by
+up to 0.07 Angstrom in PAE, which moved the derived ipSAE of the A/B pair from 0.049101 to
+0.049132. Reproducibility here means the same inputs and settings produce the same predictions
+within that tolerance, not identical bytes.
 with fused kernels, the reference backend, or `CUBLAS_WORKSPACE_CONFIG=:4096:8`.
 
 Seed mapping (frozen): base seed `S` and one-based sample index `i` give

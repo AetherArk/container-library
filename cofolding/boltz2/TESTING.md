@@ -127,3 +127,12 @@ launcher tests.
     load, no `metrics/derived.json`, receipt and `predictions.jsonl` say
     `disabled_by_--derived_none`.
 - No registry publication; the image is local and the change is uncommitted.
+
+## Published digest acceptance, run on this host (RTX 5070 Ti)
+
+`ghcr.io/aetherark/boltz2@sha256:7821f9c67f4a61d34afad4764f1ca6d070856a01685e825e32cf56ec29dcfc54`
+pulled anonymously and passed to `run_cofold.py` with the Trp-cage input, seed 11, one sample, three
+recycles, 200 steps, `--no-kernels`. Run `completed` with one checkpoint load, the job recorded
+`derived: metrics/derived.json`, and `run.json.implementation.image_id` reports the label digest
+rather than null. Derived A/L pair at cutoff 10: `ipsae` 0.561659, `ipsae12` 0.561659, `d0 = 2.0`
+(ligand side), which is the expected fixed-`d0` ligand case.

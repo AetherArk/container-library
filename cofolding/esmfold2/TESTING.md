@@ -42,8 +42,11 @@ loaded and no CUDA call was made.
 - CYP3A4 + ligand + heme, 200 steps or 20 steps: `cuda_out_of_memory` in both cases, peak allocated
   15.6 GB of 16.6 GB. The 13.8 GB of weights leave ~2.8 GB, so the limit is card capacity, not the
   sampling schedule. This system needs a 24 GB or larger card.
-- Determinism at a fixed seed: PAE bitwise identical; coordinates within 0.02 Angstrom but not
-  bitwise identical (fused, reference, and `CUBLAS_WORKSPACE_CONFIG=:4096:8` all tested).
+- Determinism within one invocation shape at a fixed seed: PAE bitwise identical; coordinates within
+  0.02 Angstrom but not bitwise identical (fused, reference, and `CUBLAS_WORKSPACE_CONFIG=:4096:8`
+  all tested). Across independent invocations this is a tolerance, not byte identity: the same
+  two-chain input at seed 11 on identical weights gave PAE differing by up to 0.0689 Angstrom
+  between the rc3 and rc5 runs, moving A/B ipSAE from 0.049101 to 0.049132.
 - A failed system does not disturb the others: with the two examples in one invocation, Trp-cage
   completed and CYP failed, with `run.json` status `failed` and one checkpoint load in total.
 - `--resume` on a completed output directory: second invocation reported
@@ -187,3 +190,24 @@ GPU 1 with Trp-cage/ethanol, seed 11, one sample:
   `ipSAE_d0chn`, `ipTM_d0chn`, `n0chn/n0dom` and `d0chn/d0dom`; worst absolute difference was
   3.612e-07 (limited by the reference TSV's six-decimal print), well under the 1e-5 gate.
 - No registry publication; the image is local and the change is uncommitted.
+
+## Published digest acceptance, run on this host (RTX 5070 Ti)
+
+`ghcr.io/aetherark/esmfold2@sha256:2c18d66e843138eb5cfd7c0c7a902f7a5ce344052262ab2183e591f3ea5b037f`
+pulled anonymously and run through `run_cofold.py` with `two-chain.yaml` and `trpcage-ethanol.yaml`,
+seed 11, one sample. Both jobs `completed` with one checkpoint load, each with
+`derived: metrics/derived.json`.
+
+Cross-check against the reference implementations on this run's own CIF and PAE:
+
+- A/B: `ipsae` 0.049132 and `ipsae12` 0.049132 against reference 0.049132; `ipsae21` 0.047161
+  against 0.047161; `iPAE12` 4.929814 and `iPAE21` 4.887278 against the reference's 3-decimal 4.930
+  and 4.887. Worst score difference 1.1e-7, which is the reference's printing precision.
+- B/L: `ipsae` 0.182460 against 0.182460; `ipsae21` 0.017730 against 0.017730.
+- The reference reports only pairs with a heavy-atom contact <= 5 A; the container reports all
+  chain pairs, so A/L appears in `derived.json` without a reference row.
+
+Note on the numbers: this run's A/B ipSAE is 0.049132 where the rc3 acceptance run gave 0.049101,
+because the two invocations' PAE arrays differ by up to 0.0689 Angstrom despite identical weights,
+input and seed. The scoring is correct on each; the prediction itself is reproducible to a tolerance,
+as recorded in SPEC.md.
